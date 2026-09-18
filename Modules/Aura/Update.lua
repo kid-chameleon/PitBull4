@@ -2,6 +2,7 @@
 -- aura frames and set the data to display the auras.
 
 local PitBull4 = _G.PitBull4
+local UnitGUID = PitBull4.UnitGUID
 local L = PitBull4.L
 
 local PitBull4_Aura = PitBull4:GetModule("Aura")

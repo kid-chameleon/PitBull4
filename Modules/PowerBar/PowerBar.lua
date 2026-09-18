@@ -1,9 +1,15 @@
 
 local PitBull4 = _G.PitBull4
+local UnitGUID = PitBull4.UnitGUID
 local L = PitBull4.L
 
 local EXAMPLE_VALUE = 0.6
 local PowerBarColor = _G.PowerBarColor
+
+-- Secret values (WoW: Forever): power is never readable, the bar takes
+-- UnitPowerPercent directly.
+local has_secrets = PitBull4.has_secrets
+local issecretvalue = _G.issecretvalue or function() return false end
 
 local PitBull4_PowerBar = PitBull4:NewModule("PowerBar")
 
@@ -66,8 +72,12 @@ function PitBull4_PowerBar:GetValue(frame)
 
 	if layout_db.hide_no_mana and UnitPowerType(unit) ~= 0 then
 		return nil
-	elseif layout_db.hide_no_power and max <= 0 then
+	elseif layout_db.hide_no_power and not issecretvalue(max) and max <= 0 then
 		return nil
+	end
+
+	if has_secrets then
+		return UnitPowerPercent(unit)
 	end
 
 	if max == 0 then

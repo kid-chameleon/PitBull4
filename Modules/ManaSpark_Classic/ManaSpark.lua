@@ -24,6 +24,11 @@ local SPELL_POWER_MANA = Enum.PowerType.Mana
 local MANA_REGEN_TIME = 5
 local INVERSE_MANA_REGEN_TIME = 1 / MANA_REGEN_TIME
 
+-- Secret values (WoW: Forever): mana is unreadable, so a successful cast is
+-- taken as the start of the five-second rule without checking that it cost
+-- mana, and the spark is not hidden at full mana.
+local has_secrets = PitBull4.has_secrets
+
 local current_mana = 0
 local last_spellcast = 0
 local last_mana_lost = 0
@@ -37,7 +42,9 @@ function PitBull4_ManaSpark:OnEnable()
 	self:RegisterUnitEvent("UNIT_MAXPOWER", nil, "player")
 	self:RegisterUnitEvent("UNIT_DISPLAYPOWER", "UNIT_MAXPOWER", "player")
 
-	current_mana = UnitPower("player", SPELL_POWER_MANA)
+	if not has_secrets then
+		current_mana = UnitPower("player", SPELL_POWER_MANA)
+	end
 end
 
 function PitBull4_ManaSpark:OnDisable()
@@ -57,7 +64,7 @@ function PitBull4_ManaSpark:UpdateFrame(frame)
 		end
 	end
 
-	if UnitPower("player", SPELL_POWER_MANA) == UnitPowerMax("player", SPELL_POWER_MANA) then
+	if not has_secrets and UnitPower("player", SPELL_POWER_MANA) == UnitPowerMax("player", SPELL_POWER_MANA) then
 		return self:ClearFrame(frame)
 	end
 
@@ -123,13 +130,13 @@ end
 PitBull4_ManaSpark.OnHide = PitBull4_ManaSpark.ClearFrame
 
 function PitBull4_ManaSpark:UNIT_MAXPOWER(_, unit)
-	if unit ~= "player" then return end
+	if unit ~= "player" or has_secrets then return end
 
 	current_mana = UnitPower("player", SPELL_POWER_MANA)
 end
 
 function PitBull4_ManaSpark:UNIT_POWER_FREQUENT(_, unit, power_type)
-	if unit ~= "player" or power_type ~= "MANA" then return end
+	if unit ~= "player" or power_type ~= "MANA" or has_secrets then return end
 
 	-- the mana spent tick happens right before U_S_S now so we need to record
 	-- when mana is spent and compare that to when the last cast ended to know
@@ -148,6 +155,10 @@ end
 function PitBull4_ManaSpark:UNIT_SPELLCAST_SUCCEEDED(_, unit)
 	if unit ~= "player" then return end
 
+	if has_secrets then
+		spellcast_finish_time = GetTime()
+		return
+	end
 	last_spellcast = GetTime()
 end
 

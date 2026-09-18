@@ -17,8 +17,20 @@ function PitBull4_RoleIcon:OnEnable()
 	self:RegisterEvent("PLAYER_ROLES_ASSIGNED")
 end
 
+local issecretvalue = _G.issecretvalue or function() return false end
+
+-- UnitGroupRolesAssigned returns a secret for units outside the group when
+-- secret values are enforced; treat that as no role.
+local function get_role(unit)
+	local role = UnitGroupRolesAssigned(unit)
+	if issecretvalue(role) then
+		return "NONE"
+	end
+	return role
+end
+
 function PitBull4_RoleIcon:GetTexture(frame)
-	local role = UnitGroupRolesAssigned(frame.unit)
+	local role = get_role(frame.unit)
 	if role == "NONE" then
 		return nil
 	end
@@ -41,7 +53,7 @@ tex_coords[2] = tex_coords.HEALER
 tex_coords[3] = tex_coords.DAMAGER
 
 function PitBull4_RoleIcon:GetTexCoord(frame)
-	local role = UnitGroupRolesAssigned(frame.unit)
+	local role = get_role(frame.unit)
 	local tex_coord = tex_coords[role]
 	if not tex_coord then
 		return nil
@@ -51,7 +63,7 @@ function PitBull4_RoleIcon:GetTexCoord(frame)
 end
 
 function PitBull4_RoleIcon:GetExampleTexCoord(frame)
-	local role = UnitGroupRolesAssigned(frame.unit)
+	local role = get_role(frame.unit)
 	local tex_coord = tex_coords[role] or tex_coords[math.random(1, 3)]
 
 	return tex_coord[1], tex_coord[2], tex_coord[3], tex_coord[4]

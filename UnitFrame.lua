@@ -7,6 +7,8 @@ local L = PitBull4.L
 local DEBUG = PitBull4.DEBUG
 local expect = PitBull4.expect
 local frames_to_anchor = PitBull4.frames_to_anchor
+local UnitGUID = PitBull4.UnitGUID
+local IsPseudoGUID = PitBull4.IsPseudoGUID
 
 -- CONSTANTS ----------------------------------------------------------------
 
@@ -77,7 +79,9 @@ function PitBull4:MakeSingletonFrame(classification)
 			frame:SetAttribute("ping-receiver", true)
 		end
 
-		frame:WrapScript(frame, "OnAttributeChanged", Singleton_OnAttributeChanged)
+		if PitBull4.secure_snippets_ok then
+			frame:WrapScript(frame, "OnAttributeChanged", Singleton_OnAttributeChanged)
+		end
 		frame.is_singleton = true
 
 		frame.classification = classification
@@ -586,6 +590,13 @@ SingletonUnitFrame.RefixSizeAndPosition = PitBull4:OutOfCombatWrapper(SingletonU
 -- This handles UnitWatch and the custom StateDriver
 -- @usage frame:Activate()
 function SingletonUnitFrame:Activate()
+	if not PitBull4.secure_snippets_ok then
+		-- Without the OnAttributeChanged snippet nothing turns the
+		-- state-unitexists attribute into Show/Hide, so let the unit watch
+		-- do it directly. Config mode cannot force frames shown this way.
+		RegisterUnitWatch(self)
+		return
+	end
 	RegisterUnitWatch(self, true)
 	RegisterAttributeDriver(self, "state-pb4visibility", "[petbattle] hide; default")
 end
@@ -811,13 +822,16 @@ function UnitFrame:UpdateGUID(guid, update)
 	end
 
 	-- if the guids are the same, cut out, but don't if it's a wacky unit that has a guid.
-	if update ~= true and self.guid == guid and not (guid and self.is_wacky and not self.best_unit) then
+	-- A pseudo guid stands in for a secret one, so the identity is unknown and
+	-- has to be assumed to have changed.
+	local is_pseudo = guid and IsPseudoGUID(guid)
+	if update ~= true and self.guid == guid and not is_pseudo and not (guid and self.is_wacky and not self.best_unit) then
 		return
 	end
 	local previousGUID = self.guid
 	self.guid = guid
 	if update ~= false then
-		self:Update(previousGUID == guid)
+		self:Update(previousGUID == guid and not is_pseudo)
 	end
 end
 

@@ -4,6 +4,11 @@ local L = PitBull4.L
 
 local EXAMPLE_VALUE = 0.6
 
+-- Secret values (WoW: Forever): threat against the target is readable for the
+-- player, pets and group members, which is all this bar shows, except on
+-- restricted maps. A secret percentage cannot be scaled, so the bar hides.
+local issecretvalue = _G.issecretvalue or function() return false end
+
 local PitBull4_ThreatBar = PitBull4:NewModule("ThreatBar")
 
 PitBull4_ThreatBar:SetModuleType("bar")
@@ -59,7 +64,7 @@ function PitBull4_ThreatBar:GetValue(frame)
 	end
 
 	local _, _, scaled_percent = UnitDetailedThreatSituation(frame.unit, "target")
-	if not scaled_percent then
+	if not scaled_percent or issecretvalue(scaled_percent) then
 		return nil
 	end
 	return scaled_percent / 100
@@ -74,7 +79,7 @@ end
 function PitBull4_ThreatBar:GetColor(frame, value)
 	if frame.guid then
 		local _, status = UnitDetailedThreatSituation(frame.unit, "target")
-		if status then
+		if status and not issecretvalue(status) then
 			return GetThreatStatusColor(status)
 		end
 	end

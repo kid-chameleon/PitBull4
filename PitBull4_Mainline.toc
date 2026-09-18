@@ -1,4 +1,4 @@
-## Interface: 110207
+## Interface: 110207, 16001
 ## Title: PitBull Unit Frames 4.0
 ## Notes: Dog-themed unit frames. Woof. Arf. Yip.
 ## Notes-deDE: Rahmen im Hunde-Design. Wuff-Wuff. Wau.
@@ -23,4 +23,5 @@
 
 libs.xml
 load.xml
-modules.xml
+modules.xml [AllowLoadGameType standard]
+modules_Camelot.xml [AllowLoadGameType camelot]

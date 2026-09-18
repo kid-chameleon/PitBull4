@@ -1,5 +1,6 @@
 local _G = _G
 local PitBull4 = _G.PitBull4
+local UnitGUID = PitBull4.UnitGUID
 
 -- luacheck: globals oRA3 ClickCastHeader SecureButton_GetModifiedUnit RAID_CLASS_COLORS
 
@@ -32,6 +33,11 @@ local in_force_show = false
 -- @param group the name for the group. Also acts as a unique identifier.
 -- @usage local header = PitBull4:MakeGroupHeader("Monkey")
 function PitBull4:MakeGroupHeader(group)
+	if not PitBull4.secure_snippets_ok then
+		-- SecureGroupHeaderTemplate drives its children through the
+		-- initialConfigFunction snippet; nothing can be built without it.
+		return
+	end
 	if DEBUG then
 		expect(group, 'typeof', 'string')
 	end

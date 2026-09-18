@@ -1,5 +1,6 @@
 
 local PitBull4 = _G.PitBull4
+local UnitGUID = PitBull4.UnitGUID
 local L = PitBull4.L
 
 local CLASS_TEX_COORDS = {}

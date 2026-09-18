@@ -7,6 +7,22 @@ local DEBUG = PitBull4.DEBUG
 local expect = PitBull4.expect
 local new, del = PitBull4.new, PitBull4.del
 
+-- On clients that enforce secret values (WoW: Forever) modules return secret
+-- values in [0, 1]; those cannot be clamped or compared here, the engine
+-- clamps them when they reach the bar, and the bar control has to be one
+-- built out of real StatusBars.
+local has_secrets = PitBull4.has_secrets
+local issecretvalue = _G.issecretvalue or function() return false end
+
+local INTERPOLATION_IMMEDIATE = Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.Immediate
+
+local function make_status_bar(frame)
+	if has_secrets then
+		return PitBull4.Controls.MakeSecretStatusBar(frame)
+	end
+	return PitBull4.Controls.MakeBetterStatusBar(frame)
+end
+
 --
 -- Shared code between bar and bar_provider modules.
 --
@@ -43,12 +59,25 @@ local function call_value_function(self, frame, bar_db)
 	if not value then
 		return nil, nil, nil
 	end
+	if issecretvalue(value) then
+		if not extra then
+			return value, nil, icon
+		end
+		-- neither value can be inspected; the layers are clamped by the engine
+		return value, extra, icon
+	end
 	if value < 0 or value ~= value then -- NaN
 		value = 0
 	elseif value > 1 then
 		value = 1
 	end
-	if not extra or extra <= 0 or extra ~= extra then -- NaN
+	if not extra then
+		return value, nil, icon
+	end
+	if issecretvalue(extra) then
+		return value, extra, icon
+	end
+	if extra <= 0 or extra ~= extra then -- NaN
 		return value, nil, icon
 	end
 
@@ -410,13 +439,27 @@ function BarModule:UpdateFrame(frame)
 	local control = frame[id]
 	local made_control = not control
 	if made_control then
-		control = PitBull4.Controls.MakeBetterStatusBar(frame)
+		control = make_status_bar(frame)
 		frame[id] = control
 	end
 
 	control:SetTexture(self:GetTexture(frame))
 
-	control:SetValue(value)
+	-- A module may declare :GetDuration(frame) and return a duration object,
+	-- which lets the engine animate the bar against the clock. That is the
+	-- only way to show progress whose start and end times are secret, and it
+	-- removes the per-frame value updates even where they are not. The value
+	-- from :GetValue is still what the bar falls back to, and still decides
+	-- whether the bar exists at all.
+	local duration, direction
+	if self.GetDuration and control.SetTimerDuration then
+		duration, direction = self:GetDuration(frame)
+	end
+	if duration then
+		control:SetTimerDuration(duration, INTERPOLATION_IMMEDIATE, direction)
+	else
+		control:SetValue(value)
+	end
 	local r, g, b, a, atlas = call_color_function(self, frame, nil, value, extra or 0, icon)
 	control:SetColor(r, g, b)
 	control:SetNormalAlpha(a)
@@ -604,7 +647,7 @@ function BarProviderModule:UpdateFrame(frame)
 			end
 		else
 			if not bar then
-				bar = PitBull4.Controls.MakeBetterStatusBar(frame)
+				bar = make_status_bar(frame)
 				bars[name] = bar
 				frame[self.id .. ";" .. name] = bar
 				bar.db = bar_db

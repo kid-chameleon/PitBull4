@@ -1,0 +1,466 @@
+-- The tag library for TagTexts. Every tag returns a string, a number or nil.
+-- The value may be a secret: it is only ever handed to string.format,
+-- C_StringUtil and FontString:SetFormattedText, all of which accept secrets.
+-- Branching happens only on values that are never secret (connection,
+-- death, unit type, power type, levels of the player's own group).
+
+local _G = _G
+local PitBull4 = _G.PitBull4
+local L = PitBull4.L
+
+local PitBull4_TagTexts = PitBull4:GetModule("TagTexts")
+
+local issecretvalue = _G.issecretvalue or function() return false end
+local format = string.format
+
+-- Secret-safe string helpers, with plain fallbacks for clients without them.
+local WrapString = C_StringUtil and C_StringUtil.WrapString or function(infix, prefix, suffix)
+	if infix == nil or infix == "" then
+		return ""
+	end
+	return (prefix or "") .. infix .. (suffix or "")
+end
+local TruncateWhenZero = C_StringUtil and C_StringUtil.TruncateWhenZero or function(number)
+	if number == 0 then
+		return ""
+	end
+	return format("%d", number)
+end
+
+-- Percentages are produced by the engine through a curve; the ready-made
+-- one scales [0, 1] to [0, 100].
+local ScaleTo100 = CurveConstants and CurveConstants.ScaleTo100
+if not ScaleTo100 and C_CurveUtil then
+	ScaleTo100 = C_CurveUtil.CreateCurve()
+	ScaleTo100:AddPoint(0, 0)
+	ScaleTo100:AddPoint(1, 100)
+end
+
+local UnitHealthPercent = _G.UnitHealthPercent or function(unit)
+	local max = UnitHealthMax(unit)
+	if max == 0 then return 0 end
+	return UnitHealth(unit) / max * 100
+end
+local UnitHealthMissing = _G.UnitHealthMissing or function(unit)
+	return UnitHealthMax(unit) - UnitHealth(unit)
+end
+local UnitPowerPercent = _G.UnitPowerPercent or function(unit, power_type)
+	local max = UnitPowerMax(unit, power_type)
+	if max == 0 then return 0 end
+	return UnitPower(unit, power_type) / max * 100
+end
+local UnitPowerMissing = _G.UnitPowerMissing or function(unit, power_type)
+	return UnitPowerMax(unit, power_type) - UnitPower(unit, power_type)
+end
+
+local function health_percent(unit)
+	if ScaleTo100 then
+		return UnitHealthPercent(unit, true, ScaleTo100)
+	end
+	return UnitHealthPercent(unit)
+end
+
+local function power_percent(unit, power_type)
+	if ScaleTo100 then
+		return UnitPowerPercent(unit, power_type, false, ScaleTo100)
+	end
+	return UnitPowerPercent(unit, power_type)
+end
+
+local function is_player(unit)
+	return UnitIsPlayer(unit) or UnitInPartyIsAI(unit)
+end
+
+local GetQuestDifficultyColor = _G.GetQuestDifficultyColor or function() return { r = 1, g = 1, b = 1 } end
+
+local function hex(r, g, b)
+	return format("|cff%02x%02x%02x", r * 255, g * 255, b * 255)
+end
+
+local UNIT_EVENTS_HEALTH = { UNIT_HEALTH = "unit", UNIT_MAXHEALTH = "unit", UNIT_CONNECTION = "unit", UNIT_FLAGS = "unit" }
+local UNIT_EVENTS_POWER = { UNIT_POWER_FREQUENT = "unit", UNIT_MAXPOWER = "unit", UNIT_DISPLAYPOWER = "unit" }
+
+-----------------------------------------------------------------------------
+-- Status
+-----------------------------------------------------------------------------
+
+-- Offline, feigning death, ghost or dead: all plain booleans.
+local function status(unit)
+	if not UnitIsConnected(unit) then
+		return _G.PLAYER_OFFLINE
+	elseif UnitIsFeignDeath(unit) then
+		return L["Feigned Death"]
+	elseif UnitIsGhost(unit) then
+		return L["Ghost"]
+	elseif UnitIsDead(unit) then
+		return L["Dead"]
+	end
+	return nil
+end
+
+PitBull4_TagTexts:RegisterTag("status", UNIT_EVENTS_HEALTH, status, L["Offline, Feigned Death, Ghost or Dead, otherwise nothing"])
+
+-----------------------------------------------------------------------------
+-- Health
+-----------------------------------------------------------------------------
+
+PitBull4_TagTexts:RegisterTag("curhp", UNIT_EVENTS_HEALTH, function(unit)
+	return format("%d", UnitHealth(unit))
+end, L["current health"])
+
+PitBull4_TagTexts:RegisterTag("maxhp", UNIT_EVENTS_HEALTH, function(unit)
+	return format("%d", UnitHealthMax(unit))
+end, L["maximum health"])
+
+PitBull4_TagTexts:RegisterTag("perhp", UNIT_EVENTS_HEALTH, function(unit)
+	return format("%d", health_percent(unit))
+end, L["health percentage, without the % sign"])
+
+PitBull4_TagTexts:RegisterTag("missinghp", UNIT_EVENTS_HEALTH, function(unit)
+	return TruncateWhenZero(UnitHealthMissing(unit))
+end, L["missing health, nothing when full"])
+
+-- [hp], [hp(percent)], [hp(missing)], [hp(smart)], [hp(both)], [hp(info)]:
+-- the status when the unit is dead or offline, otherwise the chosen style
+PitBull4_TagTexts:RegisterTag("hp", UNIT_EVENTS_HEALTH, function(unit, frame, style)
+	local s = status(unit)
+	if s then
+		return s
+	end
+	if style == "percent" then
+		return format("%d%%", health_percent(unit))
+	elseif style == "missing" then
+		return WrapString(TruncateWhenZero(UnitHealthMissing(unit)), "-", "")
+	elseif style == "smart" then
+		if UnitIsFriend("player", unit) then
+			return WrapString(TruncateWhenZero(UnitHealthMissing(unit)), "|cffff7f7f", "|r")
+		end
+		return format("%d/%d", UnitHealth(unit), UnitHealthMax(unit))
+	elseif style == "both" then
+		return format("%d/%d || %d%%", UnitHealth(unit), UnitHealthMax(unit), health_percent(unit))
+	elseif style == "info" then
+		local missing = ""
+		if UnitIsFriend("player", unit) then
+			missing = WrapString(TruncateWhenZero(UnitHealthMissing(unit)), "|cffff7f7f", "|r || ")
+		end
+		return format("%s%d/%d || %d%%", missing, UnitHealth(unit), UnitHealthMax(unit), health_percent(unit))
+	end
+	return format("%d/%d", UnitHealth(unit), UnitHealthMax(unit))
+end, L["health as current/maximum, or the status; styles: percent, missing, smart, both, info"])
+
+-----------------------------------------------------------------------------
+-- Power
+-----------------------------------------------------------------------------
+
+-- Whether the unit has the power at all is only decidable when the maximum
+-- is readable (the player's group); everyone else is assumed to have it.
+local function has_power(unit, power_type)
+	local max = UnitPowerMax(unit, power_type)
+	if issecretvalue(max) then
+		return true
+	end
+	return max > 0
+end
+
+PitBull4_TagTexts:RegisterTag("curpp", UNIT_EVENTS_POWER, function(unit)
+	return format("%d", UnitPower(unit))
+end, L["current power"])
+
+PitBull4_TagTexts:RegisterTag("maxpp", UNIT_EVENTS_POWER, function(unit)
+	return format("%d", UnitPowerMax(unit))
+end, L["maximum power"])
+
+PitBull4_TagTexts:RegisterTag("perpp", UNIT_EVENTS_POWER, function(unit)
+	return format("%d", power_percent(unit))
+end, L["power percentage, without the % sign"])
+
+PitBull4_TagTexts:RegisterTag("missingpp", UNIT_EVENTS_POWER, function(unit)
+	return TruncateWhenZero(UnitPowerMissing(unit))
+end, L["missing power, nothing when full"])
+
+PitBull4_TagTexts:RegisterTag("pp", UNIT_EVENTS_POWER, function(unit, frame, style)
+	if not has_power(unit) then
+		return nil
+	end
+	if style == "percent" then
+		return format("%d%%", power_percent(unit))
+	elseif style == "missing" then
+		return WrapString(TruncateWhenZero(UnitPowerMissing(unit)), "-", "")
+	elseif style == "smart" then
+		return WrapString(TruncateWhenZero(UnitPowerMissing(unit)), "|cff7f7fff", "|r")
+	elseif style == "both" then
+		return format("%d/%d || %d%%", UnitPower(unit), UnitPowerMax(unit), power_percent(unit))
+	end
+	return format("%d/%d", UnitPower(unit), UnitPowerMax(unit))
+end, L["power as current/maximum, nothing for units without power; styles: percent, missing, smart, both"])
+
+PitBull4_TagTexts:RegisterTag("druidmana", UNIT_EVENTS_POWER, function(unit)
+	if UnitPowerType(unit) == 0 then
+		return nil
+	end
+	return format("%d/%d", UnitPower(unit, 0), UnitPowerMax(unit, 0))
+end, L["mana while in a form that uses another power"])
+
+PitBull4_TagTexts:RegisterTag("combos", { UNIT_POWER_FREQUENT = "all", UNIT_POWER_UPDATE = "all", PLAYER_TARGET_CHANGED = "all" }, function(unit)
+	if unit ~= "player" and unit ~= "target" then
+		return nil
+	end
+	return TruncateWhenZero(GetComboPoints("player", "target"))
+end, L["combo points on the target, nothing at zero"])
+
+-----------------------------------------------------------------------------
+-- Identity
+-----------------------------------------------------------------------------
+
+PitBull4_TagTexts:RegisterTag("name", { UNIT_NAME_UPDATE = "unit" }, function(unit)
+	return (UnitName(unit))
+end, L["unit name"])
+
+PitBull4_TagTexts:RegisterTag("level", { UNIT_LEVEL = "all" }, function(unit)
+	local level = UnitLevel(unit)
+	if level <= 0 then
+		return "??"
+	end
+	return level
+end, L["unit level, ?? when unknown"])
+
+PitBull4_TagTexts:RegisterTag("class", {}, function(unit)
+	return (UnitClass(unit))
+end, L["unit class"])
+
+PitBull4_TagTexts:RegisterTag("race", {}, function(unit)
+	if UnitIsPlayer(unit) then
+		return UnitRace(unit) or UNKNOWN
+	end
+	return UnitCreatureFamily(unit) or UnitCreatureType(unit) or UNKNOWN
+end, L["race for players, creature type otherwise"])
+
+local classification_lookup = {
+	rare = L["Rare"],
+	rareelite = L["Rare-Elite"],
+	elite = L["Elite"],
+	worldboss = L["Boss"],
+	minus = L["Minus"],
+	trivial = L["Trivial"],
+}
+PitBull4_TagTexts:RegisterTag("classification", { UNIT_CLASSIFICATION_CHANGED = "unit" }, function(unit)
+	return classification_lookup[PitBull4.Utils.BetterUnitClassification(unit)]
+end, L["Elite, Rare, Boss, ... or nothing"])
+
+PitBull4_TagTexts:RegisterTag("afk", { PLAYER_FLAGS_CHANGED = "unit" }, function(unit)
+	if UnitIsAFK(unit) then
+		return _G.AFK
+	end
+	return nil
+end, L["AFK when the unit is away"])
+
+PitBull4_TagTexts:RegisterTag("dnd", { PLAYER_FLAGS_CHANGED = "unit" }, function(unit)
+	if UnitIsDND(unit) then
+		return _G.DND
+	end
+	return nil
+end, L["DND when the unit does not want to be disturbed"])
+
+PitBull4_TagTexts:RegisterTag("afkdnd", { PLAYER_FLAGS_CHANGED = "unit" }, function(unit)
+	if UnitIsAFK(unit) then
+		return _G.AFK
+	elseif UnitIsDND(unit) then
+		return _G.DND
+	end
+	return nil
+end, L["AFK or DND"])
+
+-----------------------------------------------------------------------------
+-- Casting
+-----------------------------------------------------------------------------
+
+local CAST_EVENTS = {
+	UNIT_SPELLCAST_START = "unit", UNIT_SPELLCAST_STOP = "unit",
+	UNIT_SPELLCAST_FAILED = "unit", UNIT_SPELLCAST_INTERRUPTED = "unit",
+	UNIT_SPELLCAST_SUCCEEDED = "unit", UNIT_SPELLCAST_DELAYED = "unit",
+	UNIT_SPELLCAST_CHANNEL_START = "unit", UNIT_SPELLCAST_CHANNEL_UPDATE = "unit",
+	UNIT_SPELLCAST_CHANNEL_STOP = "unit", PLAYER_TARGET_CHANGED = "all",
+}
+
+-- The name is secret for anything but the player and its pet, which the
+-- engine will still render. There is no tag for the remaining time: that
+-- needs a duration text binding the engine writes into continuously, which
+-- a format string cannot express.
+PitBull4_TagTexts:RegisterTag("castname", CAST_EVENTS, function(unit)
+	local name = UnitCastingInfo(unit)
+	if name then
+		return name
+	end
+	return (UnitChannelInfo(unit))
+end, L["the spell being cast"])
+
+-----------------------------------------------------------------------------
+-- Threat, experience, reputation
+-----------------------------------------------------------------------------
+
+PitBull4_TagTexts:RegisterTag("threat", { UNIT_THREAT_LIST_UPDATE = "all", UNIT_THREAT_SITUATION_UPDATE = "all" }, function(unit)
+	local _, _, scaled_percent = UnitDetailedThreatSituation(unit, "target")
+	if not scaled_percent then
+		return nil
+	end
+	return format("%d%%", scaled_percent)
+end, L["threat percentage against the target"])
+
+PitBull4_TagTexts:RegisterTag("xp", { PLAYER_XP_UPDATE = "all", UNIT_PET_EXPERIENCE = "all", UPDATE_EXHAUSTION = "all" }, function(unit)
+	local cur, max, rest
+	if unit == "player" then
+		cur, max, rest = UnitXP(unit), UnitXPMax(unit), GetXPExhaustion()
+	elseif unit == "pet" and GetPetExperience then
+		cur, max = GetPetExperience()
+	else
+		return nil
+	end
+	if not max or max == 0 then
+		return nil
+	end
+	if rest and rest > 0 then
+		return format("%d/%d (%d%%) R: %d%%", cur, max, cur / max * 100, rest / max * 100)
+	end
+	return format("%d/%d (%d%%)", cur, max, cur / max * 100)
+end, L["experience as current/maximum (percent) and rested"])
+
+local function watched_faction()
+	if C_Reputation and C_Reputation.GetWatchedFactionData then
+		local data = C_Reputation.GetWatchedFactionData()
+		if not data then
+			return nil
+		end
+		return data.name, data.reaction, data.currentReactionThreshold, data.nextReactionThreshold, data.currentStanding
+	elseif GetWatchedFactionInfo then
+		return GetWatchedFactionInfo()
+	end
+	return nil
+end
+
+PitBull4_TagTexts:RegisterTag("rep", { UPDATE_FACTION = "all" }, function(unit)
+	local name, _, min, max, cur = watched_faction()
+	if not name then
+		return nil
+	end
+	cur, max = cur - min, max - min
+	if max <= 0 then
+		return name
+	end
+	return format("%d/%d (%d%%)", cur, max, cur / max * 100)
+end, L["watched reputation as current/maximum (percent)"])
+
+PitBull4_TagTexts:RegisterTag("repname", { UPDATE_FACTION = "all" }, function(unit)
+	return (watched_faction())
+end, L["watched reputation name"])
+
+-----------------------------------------------------------------------------
+-- Modifiers
+-----------------------------------------------------------------------------
+
+PitBull4_TagTexts:RegisterModifier("paren", function(value)
+	return WrapString(value, "(", ")")
+end, L["wrap in parentheses"])
+
+PitBull4_TagTexts:RegisterModifier("angle", function(value)
+	return WrapString(value, "<", ">")
+end, L["wrap in angle brackets"])
+
+PitBull4_TagTexts:RegisterModifier("bracket", function(value)
+	return WrapString(value, "[", "]")
+end, L["wrap in square brackets"])
+
+PitBull4_TagTexts:RegisterModifier("prefix", function(value, unit, frame, text)
+	return WrapString(value, text or "", "")
+end, L["add text before, unless empty"])
+
+PitBull4_TagTexts:RegisterModifier("suffix", function(value, unit, frame, text)
+	return WrapString(value, "", text or "")
+end, L["add text after, unless empty"])
+
+PitBull4_TagTexts:RegisterModifier("color", function(value, unit, frame, rrggbb)
+	if not rrggbb then
+		return value
+	end
+	return WrapString(value, "|cff" .. tostring(rrggbb), "|r")
+end, L["colour with a hex code, e.g. color(ff7f7f)"])
+
+PitBull4_TagTexts:RegisterModifier("red", function(value)
+	return WrapString(value, "|cffff0000", "|r")
+end)
+PitBull4_TagTexts:RegisterModifier("green", function(value)
+	return WrapString(value, "|cff00ff00", "|r")
+end)
+PitBull4_TagTexts:RegisterModifier("blue", function(value)
+	return WrapString(value, "|cff0000ff", "|r")
+end)
+PitBull4_TagTexts:RegisterModifier("white", function(value)
+	return WrapString(value, "|cffffffff", "|r")
+end)
+
+PitBull4_TagTexts:RegisterModifier("classcolor", function(value, unit)
+	local _, class = UnitClass(unit)
+	local color
+	if class and issecretvalue(class) then
+		-- only Blizzard's colours can be looked up with a secret class
+		if C_ClassColor and C_ClassColor.GetClassColor then
+			color = C_ClassColor.GetClassColor(class)
+			if color then
+				return WrapString(value, format("|cff%02x%02x%02x", color:GetRGBAsBytes()), "|r")
+			end
+		end
+		return value
+	end
+	local t = PitBull4.ClassColors[class] or PitBull4.ClassColors.UNKNOWN
+	return WrapString(value, hex(t[1], t[2], t[3]), "|r")
+end, L["colour by class"])
+
+local HOSTILE_REACTION = 2
+local NEUTRAL_REACTION = 4
+local FRIENDLY_REACTION = 5
+
+local function hostile_color(unit)
+	local colors = PitBull4.ReactionColors
+	if is_player(unit) or UnitPlayerControlled(unit) then
+		if UnitCanAttack(unit, "player") then
+			if UnitCanAttack("player", unit) then
+				return colors[HOSTILE_REACTION]
+			end
+			return colors.civilian
+		elseif UnitCanAttack("player", unit) then
+			return colors[NEUTRAL_REACTION]
+		elseif UnitIsPVP(unit) then
+			return colors[FRIENDLY_REACTION]
+		end
+		return colors.civilian
+	elseif UnitIsTapDenied(unit) or UnitIsDead(unit) then
+		return colors.tapped
+	end
+	local reaction = UnitReaction(unit, "player")
+	if not reaction then
+		return colors.unknown
+	elseif reaction >= 5 then
+		return colors[FRIENDLY_REACTION]
+	elseif reaction == 4 then
+		return colors[NEUTRAL_REACTION]
+	end
+	return colors[HOSTILE_REACTION]
+end
+
+PitBull4_TagTexts:RegisterModifier("hostilecolor", function(value, unit)
+	local t = hostile_color(unit)
+	return WrapString(value, hex(t[1], t[2], t[3]), "|r")
+end, L["colour by hostility"])
+
+PitBull4_TagTexts:RegisterModifier("difficultycolor", function(value, unit)
+	local level = UnitLevel(unit)
+	if level <= 0 then
+		level = 99
+	end
+	local color = GetQuestDifficultyColor(level)
+	return WrapString(value, hex(color.r, color.g, color.b), "|r")
+end, L["colour by level difficulty"])
+
+PitBull4_TagTexts:RegisterModifier("aggrocolor", function(value, unit)
+	local r, g, b = UnitSelectionColor(unit)
+	return WrapString(value, hex(r, g, b), "|r")
+end, L["colour by selection colour"])

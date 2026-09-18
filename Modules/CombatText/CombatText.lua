@@ -86,14 +86,41 @@ end
 
 local frame_to_time = {}
 
+local issecretvalue = _G.issecretvalue or function() return false end
+
 function PitBull4_CombatText:UNIT_COMBAT(_, unit, event, flags, amount, type)
+	local secret_amount = issecretvalue(amount)
 	for frame in PitBull4:IterateFramesForUnitID(unit) do
 		local font_string = frame.CombatText
 		if font_string then
 			local text = ""
 			local r, g, b = 1, 1, 1
 			local size_modifier = 1
-			if event == "IMMUNE" then
+			if secret_amount and (event == "WOUND" or event == "HEAL" or event == "ENERGIZE") then
+				-- The amount cannot be inspected, only formatted by the engine.
+				-- Zero-amount wounds (absorbs, resists, ...) show as "-0" here.
+				if event == "WOUND" then
+					if flags == "CRITICAL" or flags == "CRUSHING" then
+						size_modifier = CRITICAL_HARM_SIZE_MODIFIER
+					elseif flags == "GLANCING" then
+						size_modifier = BLOCK_SIZE_MODIFIER
+					end
+					if UnitInParty(unit) or UnitInRaid(unit) then
+						r, g, b = 1, 0, 0
+					end
+					font_string:SetFormattedText("-%d", amount)
+				elseif event == "HEAL" then
+					r, g, b = 0, 1, 0
+					if flags == "CRITICAL" then
+						size_modifier = CRITICAL_HELP_SIZE_MODIFIER
+					end
+					font_string:SetFormattedText("+%d", amount)
+				else
+					r, g, b = 0.41, 0.8, 0.94
+					font_string:SetFormattedText("%d", amount)
+				end
+				text = nil
+			elseif event == "IMMUNE" then
 				size_modifier = BLOCK_SIZE_MODIFIER
 				text = CombatFeedbackText["IMMUNE"]
 			elseif event == "WOUND" then
@@ -136,7 +163,9 @@ function PitBull4_CombatText:UNIT_COMBAT(_, unit, event, flags, amount, type)
 				text = CombatFeedbackText[event]
 			end
 
-			font_string:SetText(text)
+			if text then
+				font_string:SetText(text)
+			end
 			font_string.size_modifier = size_modifier
 			local font, size = self:GetFont(frame)
 			font_string:SetFont(font, size * size_modifier, "OUTLINE")

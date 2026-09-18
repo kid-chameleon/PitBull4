@@ -1,5 +1,6 @@
 local _G = _G
 local PitBull4 = _G.PitBull4
+local UnitGUID = PitBull4.UnitGUID
 
 local L = PitBull4.L
 
@@ -282,7 +283,7 @@ function PitBull4.Utils.BetterUnitClassification(unit)
 		end
 
 		local guid = UnitGUID(unit)
-		if not guid then
+		if not guid or PitBull4.IsPseudoGUID(guid) then
 			return classification
 		end
 

@@ -6,6 +6,15 @@ local UnitGetTotalAbsorbs = _G.UnitGetTotalAbsorbs or nil  -- XXX UnitGetTotalAb
 
 local EPSILON = 1e-5
 
+-- Secret values (WoW: Forever): heal and absorb amounts are unreadable. The
+-- engine's heal prediction calculator yields every layer as an absolute
+-- amount, clamps them by mode, and reports whether a layer was clamped, so
+-- the bar takes the amounts with SetMaxValue(maximum health) and the
+-- overheal colour is picked by SetVertexColorFromBoolean. Nothing is divided
+-- or compared here.
+local has_secrets = PitBull4.has_secrets
+local calculator = has_secrets and _G.CreateUnitHealPredictionCalculator and CreateUnitHealPredictionCalculator()
+
 local REVERSE_POINT = {
 	LEFT = "RIGHT",
 	RIGHT = "LEFT",
@@ -54,6 +63,10 @@ function PitBull4_VisualHeal:UpdateFrame(frame)
 	local guid = frame.guid
 	if not health_bar or not unit or not guid then
 		return self:ClearFrame(frame)
+	end
+
+	if calculator then
+		return self:UpdateSecretFrame(frame, health_bar, unit)
 	end
 
 	local player_healing = UnitGetIncomingHeals(unit, "player")
@@ -189,6 +202,126 @@ function PitBull4_VisualHeal:UpdateFrame(frame)
 	end
 
 	return true
+end
+
+-- Anchor the overlay bar to the end of the health bar's fill.
+local function attach_overlay(bar, health_bar)
+	bar:SetTexture(health_bar:GetTexture())
+
+	local deficit = health_bar.deficit
+	local orientation = health_bar.orientation
+	local reverse = health_bar.reverse
+	bar:SetOrientation(orientation)
+	bar:SetReverse(deficit ~= reverse)
+	bar:SetDeficit(false)
+
+	bar:ClearAllPoints()
+	local point, attach, attach_frame
+	if orientation == "HORIZONTAL" then
+		point, attach = "LEFT", "RIGHT"
+		bar:SetWidth(health_bar:GetWidth())
+		bar:SetHeight(0)
+		bar:SetPoint("TOP", health_bar, "TOP")
+		bar:SetPoint("BOTTOM", health_bar, "BOTTOM")
+	else
+		point, attach = "BOTTOM", "TOP"
+		bar:SetHeight(health_bar:GetHeight())
+		bar:SetWidth(0)
+		bar:SetPoint("LEFT", health_bar, "LEFT")
+		bar:SetPoint("RIGHT", health_bar, "RIGHT")
+	end
+
+	if deficit then
+		point, attach = attach, point
+		attach_frame = health_bar.bg
+	else
+		attach_frame = health_bar.fg
+	end
+
+	if reverse then
+		point, attach = REVERSE_POINT[point], REVERSE_POINT[attach]
+	end
+
+	bar:SetPoint(point, attach_frame, attach)
+end
+
+local function luminance(r, g, b, auto)
+	if not auto then
+		return r, g, b
+	end
+	local high = math.max(r, g, b, EPSILON)
+	return r / high, g / high, b / high
+end
+
+local outgoing_color = CreateColor(0, 1, 0, 1)
+local overheal_color = CreateColor(1, 0, 0, 0.65)
+
+function PitBull4_VisualHeal:UpdateSecretFrame(frame, health_bar, unit)
+	local layout_db = self:GetLayoutDB(frame)
+	local MISSING = Enum.UnitIncomingHealClampMode.MissingHealth
+	local display_mode = layout_db.show_overheal and Enum.UnitIncomingHealClampMode.MaximumHealth or MISSING
+	calculator:SetDamageAbsorbClampMode(layout_db.show_overabsorb and Enum.UnitDamageAbsorbClampMode.MaximumHealth or Enum.UnitDamageAbsorbClampMode.MissingHealth)
+
+	-- "some of this heal is wasted" is only reported as clamped while the
+	-- boundary is missing health, so read the flag in that mode first. The
+	-- player's layer is drawn last, so any excess belongs to it.
+	calculator:SetIncomingHealClampMode(MISSING)
+	UnitGetDetailedHealPrediction(unit, "player", calculator)
+	local _, _, _, heal_clamped = calculator:GetIncomingHeals()
+
+	-- then take the amounts under the boundary the user asked to see: with
+	-- overheal shown the layers are clamped only by maximum health, so they
+	-- extend past the end of the health bar by their real size
+	if display_mode ~= MISSING then
+		calculator:SetIncomingHealClampMode(display_mode)
+		UnitGetDetailedHealPrediction(unit, "player", calculator)
+	end
+
+	local max = calculator:GetMaximumHealth()
+	local _, player_healing, others_healing = calculator:GetIncomingHeals()
+	local absorbs = calculator:GetDamageAbsorbs()
+
+	local bar = frame.VisualHeal
+	local made = not bar
+	if made then
+		bar = PitBull4.Controls.MakeSecretStatusBar(health_bar)
+		frame.VisualHeal = bar
+		bar:SetBackgroundAlpha(0)
+	end
+
+	attach_overlay(bar, health_bar)
+	-- the overlay hangs off the fill texture, so its own rect is secret;
+	-- the health bar's rect is plain
+	bar:SetLayerSize(health_bar:GetWidth(), health_bar:GetHeight())
+
+	-- the layers are zero-length when nothing is incoming; the bar stays
+	-- since whether anything is incoming cannot be decided
+	bar:SetMaxValue(max)
+	bar:SetValue(others_healing)
+	bar:SetExtraValue(player_healing)
+	bar:SetExtra2Value(absorbs)
+
+	local db = self.db.profile.global
+	local r, g, b, a = unpack(db.incoming_color)
+	bar:SetColor(r, g, b)
+	bar:SetNormalAlpha(a)
+
+	r, g, b, a = unpack(db.outgoing_color)
+	r, g, b = luminance(r, g, b, db.auto_luminance)
+	outgoing_color:SetRGBA(r, g, b, a)
+	r, g, b, a = unpack(db.outgoing_color_overheal)
+	r, g, b = luminance(r, g, b, db.auto_luminance)
+	overheal_color:SetRGBA(r, g, b, a)
+	bar:SetExtraColor(1, 1, 1)
+	bar:SetExtraAlpha(1)
+	-- last, after every control call that would reset the layer's colour
+	bar.extra_fg:SetVertexColorFromBoolean(heal_clamped, overheal_color, outgoing_color)
+
+	r, g, b, a = unpack(db.absorb_color)
+	bar:SetExtra2Color(r, g, b)
+	bar:SetExtra2Alpha(a)
+
+	return made
 end
 
 function PitBull4_VisualHeal:UNIT_HEAL_PREDICTION(_, unit)

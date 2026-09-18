@@ -1,0 +1,68 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/
+..\FrameXML\UI.xsd">
+
+<!--
+  WoW: Forever (game type "camelot") enforces secret values: health, power,
+  auras, cast info and the identity of non-group units are unreadable from
+  addon code. Every module that reads such a value in Lua is left out here
+  until it has been rebuilt on the engine-side primitives (see
+  doc/forever-support.md). The manifest is derived from modules_TBC.xml;
+  Forever is the vanilla expansion, so the same expansion-only exclusions
+  apply.
+-->
+
+<Include file="Modules\Aggro\load.xml"/>
+<Include file="Modules\AltManaBar\load.xml"/>
+<!-- <Include file="Modules\AltPowerBar\load.xml"/> -->
+<!-- <Include file="Modules\ArcaneCharges\load.xml"/> -->
+<!-- <Include file="Modules\ArtifactPowerBar\load.xml"/> -->
+<!-- Phase 5: <Include file="Modules\Aura\load_Classic.xml"/> -->
+<Include file="Modules\Background\load.xml"/>
+<!-- <Include file="Modules\BattlePet\load.xml"/> -->
+<Include file="Modules\BlankSpace\load.xml"/>
+<Include file="Modules\Border\load.xml"/>
+<!-- <Include file="Modules\CastBar\load.xml"/> -->
+<Include file="Modules\CastBar_Classic\load.xml"/>
+<!-- not recoverable: <Include file="Modules\CastBarLatency\load.xml"/> -->
+<!-- <Include file="Modules\Chi\load.xml"/> -->
+<!-- Phase 8: <Include file="Modules\CombatFader\load.xml"/> -->
+<Include file="Modules\CombatIcon\load.xml"/>
+<Include file="Modules\CombatText\load.xml"/>
+<!-- Phase 7: <Include file="Modules\ComboPoints\load.xml"/> -->
+<!-- not recoverable: <Include file="Modules\DogTagTexts\load.xml"/> -->
+<!-- not recoverable (needs to detect energy gains): <Include file="Modules\EnergySpark_Classic\load.xml"/> -->
+<!-- <Include file="Modules\Essence\load.xml"/> -->
+<Include file="Modules\ExperienceBar\load.xml"/>
+<!-- GetPetHappiness absent on Forever: <Include file="Modules\HappinessIcon_Classic\load.xml"/> -->
+<Include file="Modules\HealthBar\load.xml"/>
+<Include file="Modules\HideBlizzard\load.xml"/>
+<Include file="Modules\Highlight\load.xml"/>
+<!-- <Include file="Modules\HolyPower\load.xml"/> -->
+<Include file="Modules\HostilityFader\load.xml"/>
+<Include file="Modules\LeaderIcon\load.xml"/>
+<!-- not recoverable: <Include file="Modules\LuaTexts\load.xml"/> -->
+<Include file="Modules\TagTexts\load.xml"/>
+<Include file="Modules\ManaSpark_Classic\load.xml"/>
+<!-- UnitInPhase absent on Forever: <Include file="Modules\PhaseFader\load.xml"/> -->
+<!-- UnitInPhase absent on Forever: <Include file="Modules\PhaseIcon\load.xml"/> -->
+<!-- Phase 8: <Include file="Modules\Portrait\load.xml"/> -->
+<Include file="Modules\PowerBar\load.xml"/>
+<Include file="Modules\PvPIcon\load.xml"/>
+<!-- <Include file="Modules\QuestIcon\load.xml"/> -->
+<!-- Phase 8: <Include file="Modules\RaidTargetIcon\load.xml"/> -->
+<!-- Phase 8: <Include file="Modules\RangeFader\load.xml"/> -->
+<Include file="Modules\ReadyCheckIcon\load.xml"/>
+<Include file="Modules\ReputationBar\load.xml"/>
+<Include file="Modules\RestIcon\load.xml"/>
+<Include file="Modules\ResurrectionIcon\load.xml"/>
+<Include file="Modules\RoleIcon\load.xml"/>
+<!-- <Include file="Modules\Runes_Classic\load.xml"/> -->
+<!-- <Include file="Modules\SoulShards_Classic\load.xml"/> -->
+<Include file="Modules\Sounds\load.xml"/>
+<!-- <Include file="Modules\SummonIcon\load.xml"/> -->
+<Include file="Modules\ThreatBar\load.xml"/>
+<!-- Phase 7: <Include file="Modules\Totems\load.xml"/> -->
+<Include file="Modules\VisualHeal\load.xml"/>
+<Include file="Modules\VoiceIcon\load.xml"/>
+
+</Ui>

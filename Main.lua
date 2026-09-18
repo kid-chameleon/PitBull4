@@ -5,9 +5,65 @@ local _G = _G
 
 local L = LibStub("AceLocale-3.0"):GetLocale("PitBull4")
 
-local wow_retail = WOW_PROJECT_ID == WOW_PROJECT_MAINLINE
-local wow_classic = WOW_PROJECT_ID ~= WOW_PROJECT_MAINLINE
 local wow_expansion = GetClassicExpansionLevel()
+-- WoW: Forever reports WOW_PROJECT_MAINLINE with the vanilla expansion level
+-- (verified on beta build 1.60.1.69913). It runs vanilla content on the retail
+-- engine, so treat it as a classic flavour for content decisions.
+local wow_forever = WOW_PROJECT_ID == WOW_PROJECT_MAINLINE and wow_expansion == LE_EXPANSION_CLASSIC
+local wow_retail = WOW_PROJECT_ID == WOW_PROJECT_MAINLINE and not wow_forever
+local wow_classic = not wow_retail
+
+-- Clients that enforce "secret values" (WoW: Forever, retail 12.x) hide unit
+-- health, power, auras, cast info and the identity of units outside the
+-- group from addon code. Values read from those APIs cannot be compared,
+-- used in arithmetic or used as table keys; they can only be handed to the
+-- widget setters that accept them. See doc/forever-support.md.
+local has_secrets = (C_Secrets and C_Secrets.HasSecretRestrictions and C_Secrets.HasSecretRestrictions()) or false
+local issecretvalue = _G.issecretvalue or function() return false end
+
+-- Under secret restrictions UnitGUID returns a secret for every unit that is
+-- neither player-controlled nor in the group (target, focus, boss, ...).
+-- The frame registry only ever compares GUIDs and uses them as table keys,
+-- so a secret GUID is replaced by a stable per-unit-token pseudo GUID.
+-- UnitFrame:UpdateGUID treats a pseudo GUID as "identity unknown, assume it
+-- changed", so frames still update on target swaps. Everything that needs a
+-- GUID must go through PitBull4.UnitGUID instead of the global.
+local pseudo_guid_to_unit = {}
+local pseudo_guids = setmetatable({}, { __index = function(self, unit)
+	local guid = "Secret-" .. unit
+	self[unit] = guid
+	pseudo_guid_to_unit[guid] = unit
+	return guid
+end })
+local UnitGUID = _G.UnitGUID
+if has_secrets then
+	UnitGUID = function(unit)
+		local guid = _G.UnitGUID(unit)
+		if guid and issecretvalue(guid) then
+			return pseudo_guids[unit]
+		end
+		return guid
+	end
+end
+
+-- The Forever beta (1.60.1.69893) loads Blizzard_EnvironmentCleanup before
+-- Blizzard_RestrictedAddOnEnvironment: the dependency between them is gated
+-- to the classic and standard game types, not camelot. The cleanup nils
+-- loadstring_untainted, RestrictedExecution.lua then captures nil, and every
+-- secure handler snippet fails to compile with "attempt to call a nil value"
+-- (RestrictedExecution.lua:79). Detect that once so the frames that rely on
+-- snippets can fall back instead of erroring on every attribute change.
+-- Snippets run from script handlers, so a failure never reaches pcall; ask
+-- for a side effect instead and silence the error handler for the attempt.
+local secure_snippets_ok = true
+if has_secrets then
+	local probe = CreateFrame("Frame", nil, nil, "SecureHandlerBaseTemplate")
+	local handler = geterrorhandler()
+	seterrorhandler(function() end)
+	pcall(SecureHandlerExecute, probe, "self:SetAttribute('pb4-snippets-ok', true)")
+	seterrorhandler(handler)
+	secure_snippets_ok = probe:GetAttribute("pb4-snippets-ok") == true
+end
 
 local SINGLETON_CLASSIFICATIONS = {
 	"player",
@@ -363,6 +419,23 @@ end
 PitBull4.wow_retail = wow_retail
 PitBull4.wow_classic = wow_classic
 PitBull4.wow_expansion = wow_expansion
+PitBull4.wow_forever = wow_forever
+PitBull4.has_secrets = has_secrets
+PitBull4.secure_snippets_ok = secure_snippets_ok
+
+--- UnitGUID that never returns a secret value; see the comment at the top of Main.lua.
+-- @param unit the UnitID to check
+-- @usage local guid = PitBull4.UnitGUID("target")
+-- @return the GUID, a pseudo GUID when the real one is secret, or nil
+PitBull4.UnitGUID = UnitGUID
+
+--- Check whether a GUID is a pseudo GUID standing in for a secret one.
+-- @param guid a value returned by PitBull4.UnitGUID
+-- @usage if PitBull4.IsPseudoGUID(frame.guid) then ... end
+-- @return true if guid is a pseudo GUID
+function PitBull4.IsPseudoGUID(guid)
+	return pseudo_guid_to_unit[guid] ~= nil
+end
 
 PitBull4.L = L
 
@@ -918,7 +991,7 @@ local function name_iter(state, frame)
 	local name,server = state.name, state.server
 	if frame.guid and frame.unit then
 		local frame_name, frame_server = UnitName(frame.unit)
-		if frame_name == name and (not server and server ~= "" or server == frame_server) then
+		if not issecretvalue(frame_name) and frame_name == name and (not server and server ~= "" or server == frame_server) then
 			return frame
 		end
 	end
@@ -1672,6 +1745,9 @@ local timerFrame = CreateFrame("Frame")
 timerFrame:Hide()
 
 function PitBull4:OnEnable()
+	if not secure_snippets_ok then
+		self:Print("Secure handler snippets do not work on this client (Blizzard_EnvironmentCleanup loads before Blizzard_RestrictedAddOnEnvironment). Group frames and config mode are disabled until Blizzard fixes the load order.")
+	end
 	self:ScheduleRepeatingTimer(refresh_all_guids, 15)
 
 	-- register unit change events
@@ -1892,6 +1968,7 @@ PitBull4.StateHeader = StateHeader
 
 -- Note please do not use tabs in the code passed to WrapScript, WoW can't display
 -- tabs in FontStrings and it makes errors inside the below code look like crap.
+if secure_snippets_ok then
 StateHeader:WrapScript(StateHeader, "OnAttributeChanged", [[
   if name ~= "new_group" and name ~= "remove_group" and name ~= "state-group" and name ~= "config_mode" and name ~= "forced_state" then return end
 
@@ -1960,14 +2037,17 @@ StateHeader:WrapScript(StateHeader, "OnAttributeChanged", [[
   end
 ]])
 RegisterAttributeDriver(StateHeader, "state-group", "[target=raid31, exists] raid40; [target=raid26, exists] raid30; [target=raid21, exists] raid25; [target=raid16, exists] raid20; [target=raid11, exists] raid15; [target=raid6, exists] raid10; [group:raid] raid; [group:party] party; solo")
+end -- secure_snippets_ok
 
 function PitBull4:AddGroupToStateHeader(header)
+	if not secure_snippets_ok then return end
 	local header_name = header:GetName()
 	StateHeader:SetFrameRef(header_name, header)
 	StateHeader:SetAttribute("new_group",header_name)
 end
 
 function PitBull4:RemoveGroupFromStateHeader(header)
+	if not secure_snippets_ok then return end
 	StateHeader:SetAttribute("remove_group",header:GetName())
 end
 
@@ -1977,6 +2057,9 @@ end
 -- @usage local state = PitBull4:GetState()
 -- @return the state of the player.
 function PitBull4:GetState()
+	if not secure_snippets_ok then
+		return PitBull4.config_mode or "solo"
+	end
 	return PitBull4.config_mode or GetManagedEnvironment(StateHeader).state
 end
 

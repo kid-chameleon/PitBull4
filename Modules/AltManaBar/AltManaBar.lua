@@ -31,6 +31,11 @@ end
 -- cached power type for optimization
 local power_type = nil
 
+-- Secret values (WoW: Forever): the player's mana is unreadable, the maximum
+-- is not. "Hide if full" cannot be decided and is ignored there.
+local has_secrets = PitBull4.has_secrets
+local UnitHasVehiclePlayerFrameUI = _G.UnitHasVehiclePlayerFrameUI or function() return false end
+
 function PitBull4_AltManaBar:OnEnable()
 	self:RegisterUnitEvent("UNIT_POWER_FREQUENT", nil, "player")
 	self:RegisterUnitEvent("UNIT_MAXPOWER", "UNIT_POWER_FREQUENT", "player")
@@ -58,6 +63,10 @@ function PitBull4_AltManaBar:GetValue(frame)
 
 	if not DISPLAY_INFO[power_type] and (player_class ~= "DRUID" or not self:GetLayoutDB(frame).show_in_forms) then
 		return nil
+	end
+
+	if has_secrets then
+		return UnitPowerPercent("player", SPELL_POWER_MANA)
 	end
 
 	local percent = UnitPower("player", SPELL_POWER_MANA) / max
