@@ -101,6 +101,10 @@ PitBull4_AltManaBar:SetLayoutOptionsFunction(function(self)
 		name = L["Hide if full"],
 		desc = L["Hide when at 100% mana."],
 		type = 'toggle',
+		disabled = function()
+			-- whether mana is full cannot be decided under secret values
+			return has_secrets
+		end,
 		get = function(info)
 			return PitBull4.Options.GetLayoutDB(self).hide_if_full
 		end,

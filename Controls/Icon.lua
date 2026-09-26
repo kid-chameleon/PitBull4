@@ -9,6 +9,12 @@ function Icon:SetTexCoord(c1, c2, c3, c4)
 	self.texture:SetTexCoord(c1, c2, c3, c4)
 end
 
+-- Pick a cell out of a sprite sheet. The cell index may be a secret, which
+-- tex coords computed from it could not be.
+function Icon:SetSpriteSheetCell(cell, rows, columns)
+	self.texture:SetSpriteSheetCell(cell, rows, columns)
+end
+
 PitBull4.Controls.MakeNewControlType("Icon", "Button", function(control)
 	-- onCreate
 	control:EnableMouse(false)

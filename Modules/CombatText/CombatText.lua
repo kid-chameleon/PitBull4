@@ -2,6 +2,10 @@
 local PitBull4 = _G.PitBull4
 local L = PitBull4.L
 
+-- Secret values (WoW: Forever): once an amount that could not be read has been
+-- written into a font string, its text reads back secret for good.
+local issecretvalue = _G.issecretvalue or function() return false end
+
 -- CONSTANTS ----------------------------------------------------------------
 
 local MAX_ALPHA = 0.6
@@ -77,16 +81,17 @@ function PitBull4_CombatText:UpdateFrame(frame)
 
 	if frame.force_show and not frame.guid then
 		font_string:SetText(EXAMPLE_TEXT)
-	elseif font_string:GetText() == EXAMPLE_TEXT then
-		font_string:SetText("")
+	else
+		local text = font_string:GetText()
+		if not issecretvalue(text) and text == EXAMPLE_TEXT then
+			font_string:SetText("")
+		end
 	end
 
 	return created
 end
 
 local frame_to_time = {}
-
-local issecretvalue = _G.issecretvalue or function() return false end
 
 function PitBull4_CombatText:UNIT_COMBAT(_, unit, event, flags, amount, type)
 	local secret_amount = issecretvalue(amount)

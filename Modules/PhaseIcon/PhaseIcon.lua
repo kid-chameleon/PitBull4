@@ -5,6 +5,22 @@ local L = PitBull4.L
 
 local PitBull4_PhaseIcon = PitBull4:NewModule("PhaseIcon")
 
+-- Forever reports the vanilla expansion level but ships the modern
+-- UnitPhaseReason and no UnitInPhase, so pick by what the client provides
+-- rather than by the expansion. The reason is secret for a unit outside the
+-- group, but the API still returns a plain nil when the unit is not phased,
+-- so the result is only ever used for its truthiness.
+local phase_reason
+if UnitPhaseReason and (ClassicExpansionAtLeast(LE_EXPANSION_SHADOWLANDS) or not UnitInPhase) then
+	phase_reason = UnitPhaseReason
+elseif UnitInPhase then
+	phase_reason = function(unit)
+		return not UnitInPhase(unit) or nil
+	end
+else
+	phase_reason = function() return nil end
+end
+
 PitBull4_PhaseIcon:SetModuleType("indicator")
 PitBull4_PhaseIcon:SetName(L["Phase icon"])
 PitBull4_PhaseIcon:SetDescription(L["Show an icon on the unit frame if the unit is out of phase with you."])
@@ -51,11 +67,7 @@ function PitBull4_PhaseIcon:GetTexture(frame)
 		return nil
 	end
 
-	if ClassicExpansionAtLeast(LE_EXPANSION_SHADOWLANDS) then
-		if not UnitPhaseReason(unit) then
-			return nil
-		end
-	elseif UnitInPhase(unit) then
+	if not phase_reason(unit) then
 		return nil
 	end
 

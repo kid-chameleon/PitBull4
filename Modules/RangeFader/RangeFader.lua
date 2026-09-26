@@ -3,6 +3,14 @@ local PitBull4 = _G.PitBull4
 local L = PitBull4.L
 
 local wow_retail = PitBull4.wow_retail
+
+-- Secret values (WoW: Forever): UnitInRange returns a boolean that may not be
+-- read, so the engine picks the opacity from it instead (see :GetSecretAlpha),
+-- and the spell-based checks are unavailable: the global IsSpellInRange is
+-- gone, and a range check per spell cannot be combined with anything.
+local has_secrets = PitBull4.has_secrets
+local issecretvalue = _G.issecretvalue or function() return false end
+local IsSpellInRange = _G.IsSpellInRange or (C_Spell and C_Spell.IsSpellInRange)
 local GetSpellName = C_Spell.GetSpellName
 local IsSpellInRange = C_Spell.IsSpellInRange
 
@@ -233,6 +241,44 @@ function PitBull4_RangeFader:GetOpacity(frame)
 	end
 end
 
+if has_secrets then
+	-- The range test is unreadable, so this module contributes no opacity the
+	-- pipeline could compare; :GetSecretAlpha does the work instead.
+	function PitBull4_RangeFader:GetOpacity(frame)
+		return nil
+	end
+
+	--- Return the opacity to use, letting the engine choose it from the range
+	-- check. Whatever the configured method, the check is UnitInRange for a
+	-- unit the player can assist and UnitIsVisible for anything else.
+	-- @param frame the unit frame
+	-- @param alpha the opacity the other faders agreed on
+	-- @return the opacity to use, which may be a secret
+	function PitBull4_RangeFader:GetSecretAlpha(frame, alpha)
+		local unit = frame.unit
+		if not unit or UnitIsUnit(unit, "player") then
+			return nil
+		end
+
+		local faded = self:GetLayoutDB(frame).out_of_range_opacity
+		if not issecretvalue(alpha) and faded > alpha then
+			faded = alpha
+		end
+
+		local in_range
+		if UnitCanAssist("player", unit) then
+			in_range = UnitInRange(unit)
+		else
+			in_range = UnitIsVisible(unit)
+		end
+
+		if not issecretvalue(in_range) then
+			return in_range and alpha or faded
+		end
+		return C_CurveUtil.EvaluateColorValueFromBoolean(in_range, alpha, faded)
+	end
+end
+
 PitBull4_RangeFader:SetLayoutOptionsFunction(function(self)
 	local get_spell_range
 	local range_pattern = _G.SPELL_RANGE:gsub("%%s", ".-")
@@ -301,6 +347,10 @@ PitBull4_RangeFader:SetLayoutOptionsFunction(function(self)
 		type = 'select',
 		name = L["Range check method"],
 		desc = L["Choose the method to determine if the unit is in range."],
+		disabled = function()
+			-- only one check is available where range is unreadable
+			return has_secrets
+		end,
 		values = {
 			helpful = L["Helpful spells (~40 yards)"],
 			class = L["Class abilities"],

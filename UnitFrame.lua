@@ -358,7 +358,7 @@ function UnitFrame__scripts:OnShow()
 		end
 	end
 
-	self:SetAlpha(PitBull4:GetFinalFrameOpacity(self))
+	PitBull4.ApplyFrameAlpha(self, PitBull4:GetFinalFrameOpacity(self))
 
 	if not self.force_show then
 		-- Force an update to fix the frame if the unit info wasn't ready (ticket 1251)

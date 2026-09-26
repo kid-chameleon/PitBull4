@@ -306,16 +306,19 @@ function PitBull4_VisualHeal:UpdateSecretFrame(frame, health_bar, unit)
 	bar:SetColor(r, g, b)
 	bar:SetNormalAlpha(a)
 
-	r, g, b, a = unpack(db.outgoing_color)
-	r, g, b = luminance(r, g, b, db.auto_luminance)
-	outgoing_color:SetRGBA(r, g, b, a)
-	r, g, b, a = unpack(db.outgoing_color_overheal)
-	r, g, b = luminance(r, g, b, db.auto_luminance)
-	overheal_color:SetRGBA(r, g, b, a)
-	bar:SetExtraColor(1, 1, 1)
-	bar:SetExtraAlpha(1)
-	-- last, after every control call that would reset the layer's colour
-	bar.extra_fg:SetVertexColorFromBoolean(heal_clamped, overheal_color, outgoing_color)
+	-- The player's own heal is tinted when it is being wasted. Colouring the
+	-- layer's texture directly does not survive the bar's own colour pass, so
+	-- the engine picks between the two colours and the result goes through the
+	-- bar like any other colour.
+	local out_r, out_g, out_b, out_a = unpack(db.outgoing_color)
+	out_r, out_g, out_b = luminance(out_r, out_g, out_b, db.auto_luminance)
+	outgoing_color:SetRGBA(out_r, out_g, out_b, out_a or 1)
+	local over_r, over_g, over_b, over_a = unpack(db.outgoing_color_overheal)
+	over_r, over_g, over_b = luminance(over_r, over_g, over_b, db.auto_luminance)
+	overheal_color:SetRGBA(over_r, over_g, over_b, over_a or 1)
+
+	bar:SetExtraColor(C_CurveUtil.EvaluateColorFromBoolean(heal_clamped, overheal_color, outgoing_color):GetRGB())
+	bar:SetExtraAlpha(C_CurveUtil.EvaluateColorValueFromBoolean(heal_clamped, over_a or 1, out_a or 1))
 
 	r, g, b, a = unpack(db.absorb_color)
 	bar:SetExtra2Color(r, g, b)

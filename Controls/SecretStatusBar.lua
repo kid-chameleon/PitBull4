@@ -124,6 +124,12 @@ local function apply_colors(self)
 	local br, bgg, bb, ba = self.bgR, self.bgG, self.bgB, self.bgA
 	if not br then
 		br, bgg, bb = normal_to_bg_color(r, g, b)
+	elseif is_secret_color(br, bgg, bb) and not is_secret_color(r, g, b) then
+		-- A background that cannot be read is only meaningful behind a
+		-- foreground that cannot be read either. A plain foreground means
+		-- something overrode it -- a class, reaction or aggro colour -- and
+		-- the background belongs to that instead.
+		br, bgg, bb = normal_to_bg_color(r, g, b)
 	end
 	if not ba then
 		ba = a

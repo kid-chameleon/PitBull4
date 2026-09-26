@@ -131,7 +131,19 @@ function IndicatorModule:UpdateFrame(frame)
 
 	control:SetTexture(tex)
 
-	control:SetTexCoord(call_tex_coord_function(self, frame, tex))
+	-- A module may declare :GetSpriteSheetCell(frame, texture) and return a
+	-- cell index with the sheet's dimensions, which the engine turns into tex
+	-- coords. That is the only way to choose a cell by an index that cannot
+	-- be read, such as a raid target marker.
+	local cell, rows, columns
+	if self.GetSpriteSheetCell and control.SetSpriteSheetCell then
+		cell, rows, columns = self:GetSpriteSheetCell(frame, tex)
+	end
+	if cell then
+		control:SetSpriteSheetCell(cell, rows, columns)
+	else
+		control:SetTexCoord(call_tex_coord_function(self, frame, tex))
+	end
 
 	control:Show()
 

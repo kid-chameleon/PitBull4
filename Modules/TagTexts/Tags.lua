@@ -77,6 +77,12 @@ local function hex(r, g, b)
 	return format("|cff%02x%02x%02x", r * 255, g * 255, b * 255)
 end
 
+-- On this client a character may have a surname, and UnitName returns it as
+-- its second value rather than a realm. Blizzard joins the two with a
+-- client-side constant (Blizzard_FrameXMLUtil/Camelot/NameUtil.lua).
+local SURNAME_SEPARATOR = Constants and Constants.CharacterNameSeparatorConsts
+	and Constants.CharacterNameSeparatorConsts.CHARACTERNAME_SURNAME_SEPARATOR or " "
+
 local UNIT_EVENTS_HEALTH = { UNIT_HEALTH = "unit", UNIT_MAXHEALTH = "unit", UNIT_CONNECTION = "unit", UNIT_FLAGS = "unit" }
 local UNIT_EVENTS_POWER = { UNIT_POWER_FREQUENT = "unit", UNIT_MAXPOWER = "unit", UNIT_DISPLAYPOWER = "unit" }
 
@@ -212,9 +218,23 @@ end, L["combo points on the target, nothing at zero"])
 -- Identity
 -----------------------------------------------------------------------------
 
-PitBull4_TagTexts:RegisterTag("name", { UNIT_NAME_UPDATE = "unit" }, function(unit)
-	return (UnitName(unit))
-end, L["unit name"])
+PitBull4_TagTexts:RegisterTag("name", { UNIT_NAME_UPDATE = "unit" }, function(unit, frame, style)
+	local name, surname = UnitName(unit)
+	-- WrapString will not take a nil, and most units have no surname.
+	-- Comparing against nil is safe even when the value is secret: a secret
+	-- compares as plainly not nil, and a unit without a surname returns a
+	-- plain nil.
+	if style == "first" or surname == nil then
+		return name
+	end
+	-- the separator is added only when the surname is not empty, and a secret
+	-- surname passes through as happily as a plain one
+	return format("%s%s", name, WrapString(surname, SURNAME_SEPARATOR, ""))
+end, L["unit name with surname; [name(first)] for the first name alone"])
+
+PitBull4_TagTexts:RegisterTag("surname", { UNIT_NAME_UPDATE = "unit" }, function(unit)
+	return (select(2, UnitName(unit)))
+end, L["unit surname, if it has one"])
 
 PitBull4_TagTexts:RegisterTag("level", { UNIT_LEVEL = "all" }, function(unit)
 	local level = UnitLevel(unit)
@@ -224,9 +244,29 @@ PitBull4_TagTexts:RegisterTag("level", { UNIT_LEVEL = "all" }, function(unit)
 	return level
 end, L["unit level, ?? when unknown"])
 
-PitBull4_TagTexts:RegisterTag("class", {}, function(unit)
-	return (UnitClass(unit))
-end, L["unit class"])
+-- UnitClass's first value is whatever the unit calls its class, and on this
+-- client a creature often reports its own name there, so a frame ends up
+-- saying "Hippogryph Protector Hippogryph Protector". Its third value is a
+-- class id, and only a real class has one that resolves, which is the test
+-- the module's own Lua text provider used. Creatures that do map to a class
+-- still show it, as they do on the classic clients.
+PitBull4_TagTexts:RegisterTag("class", {}, function(unit, frame, style)
+	local class, _, class_id = UnitClass(unit)
+	if style == "any" then
+		return class
+	end
+	if issecretvalue(class_id) then
+		-- only a player's identity is ever restricted, so this is a class
+		return class
+	end
+	if class_id then
+		local info = C_CreatureInfo.GetClassInfo(class_id)
+		if info and info.className then
+			return info.className
+		end
+	end
+	return nil
+end, L["class name, nothing for a creature without one; [class(any)] for whatever the unit reports"])
 
 PitBull4_TagTexts:RegisterTag("race", {}, function(unit)
 	if UnitIsPlayer(unit) then

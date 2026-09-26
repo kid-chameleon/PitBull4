@@ -353,6 +353,7 @@ local PROVIDED_CODES = {
 	},
 	[L["Name"]] = {
 		[L["Standard"]] = "[name] [afkdnd:angle]",
+		[L["First name only"]] = "[name(first)] [afkdnd:angle]",
 		[L["Hostility-colored"]] = "[name:hostilecolor] [afkdnd:angle]",
 		[L["Class-colored"]] = "[name:classcolor] [afkdnd:angle]",
 		[L["Long"]] = "[level] [name:classcolor] [afkdnd:angle]",
