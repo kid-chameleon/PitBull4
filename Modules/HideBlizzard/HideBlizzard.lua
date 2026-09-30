@@ -203,7 +203,14 @@ function hiders:focus()
 end
 
 function hiders:castbar()
-	hook_frames(true, PlayerCastingBarFrame or CastingBarFrame, PetCastingBarFrame)
+	local player_castbar = PlayerCastingBarFrame or CastingBarFrame
+	if EditModeManagerFrame then
+		UnregisterUnitWatch(player_castbar)
+		UnregisterUnitWatch(PetCastingBarFrame)
+		simple_hook_frames(player_castbar, PetCastingBarFrame)
+	else
+		hook_frames(true, player_castbar, PetCastingBarFrame)
+	end
 end
 
 function hiders:aura()
