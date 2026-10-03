@@ -6,6 +6,17 @@ local L = PitBull4.L
 -- written into a font string, its text reads back secret for good.
 local issecretvalue = _G.issecretvalue or function() return false end
 
+-- UnitInRaid is secret for a unit whose identity is restricted (anything
+-- outside the group inside an instance), while UnitInParty never is. Such a
+-- unit is not in the group.
+local function in_group(unit)
+	if UnitInParty(unit) then
+		return true
+	end
+	local in_raid = UnitInRaid(unit)
+	return not issecretvalue(in_raid) and in_raid
+end
+
 -- CONSTANTS ----------------------------------------------------------------
 
 local MAX_ALPHA = 0.6
@@ -110,7 +121,7 @@ function PitBull4_CombatText:UNIT_COMBAT(_, unit, event, flags, amount, type)
 					elseif flags == "GLANCING" then
 						size_modifier = BLOCK_SIZE_MODIFIER
 					end
-					if UnitInParty(unit) or UnitInRaid(unit) then
+					if in_group(unit) then
 						r, g, b = 1, 0, 0
 					end
 					font_string:SetFormattedText("-%d", amount)
@@ -136,7 +147,7 @@ function PitBull4_CombatText:UNIT_COMBAT(_, unit, event, flags, amount, type)
 						size_modifier = BLOCK_SIZE_MODIFIER
 					end
 
-					if UnitInParty(unit) or UnitInRaid(unit) then
+					if in_group(unit) then
 						r, g, b = 1, 0, 0
 					elseif type > 0 then
 						r, g, b = 1, 1, 0

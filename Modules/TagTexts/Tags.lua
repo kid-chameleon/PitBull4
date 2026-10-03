@@ -3,6 +3,12 @@
 -- C_StringUtil and FontString:SetFormattedText, all of which accept secrets.
 -- Branching happens only on values that are never secret (connection,
 -- death, unit type, power type, levels of the player's own group).
+--
+-- Two more things turn secret in instances: the identity of a unit outside
+-- the group (class, race, creature type, PvP flag, honour level...), and the
+-- AFK and DND flags of everyone, which Blizzard ties to a "chat messaging
+-- lockdown". A tag that would have to branch on one of those gives nothing
+-- or uses the engine to do the branching.
 
 local _G = _G
 local PitBull4 = _G.PitBull4
@@ -268,11 +274,25 @@ PitBull4_TagTexts:RegisterTag("class", {}, function(unit, frame, style)
 	return nil
 end, L["class name, nothing for a creature without one; [class(any)] for whatever the unit reports"])
 
+-- Every value here is secret for a unit whose identity is restricted, so
+-- only nil tests, which stay plain, decide which one is shown.
 PitBull4_TagTexts:RegisterTag("race", {}, function(unit)
 	if UnitIsPlayer(unit) then
-		return UnitRace(unit) or UNKNOWN
+		local race = UnitRace(unit)
+		if race == nil then
+			return UNKNOWN
+		end
+		return race
 	end
-	return UnitCreatureFamily(unit) or UnitCreatureType(unit) or UNKNOWN
+	local family = UnitCreatureFamily(unit)
+	if family ~= nil then
+		return family
+	end
+	local creature_type = UnitCreatureType(unit)
+	if creature_type ~= nil then
+		return creature_type
+	end
+	return UNKNOWN
 end, L["race for players, creature type otherwise"])
 
 local classification_lookup = {
@@ -287,24 +307,38 @@ PitBull4_TagTexts:RegisterTag("classification", { UNIT_CLASSIFICATION_CHANGED = 
 	return classification_lookup[PitBull4.Utils.BetterUnitClassification(unit)]
 end, L["Elite, Rare, Boss, ... or nothing"])
 
+-- UnitIsAFK and UnitIsDND return a secret boolean while chat messaging is
+-- locked down, which is the case inside instances even for the player's own
+-- party. There is no engine call that turns a boolean into a string, so the
+-- flag is simply unknown then and the tag says nothing.
+local function is_afk(unit)
+	local afk = UnitIsAFK(unit)
+	return not issecretvalue(afk) and afk
+end
+
+local function is_dnd(unit)
+	local dnd = UnitIsDND(unit)
+	return not issecretvalue(dnd) and dnd
+end
+
 PitBull4_TagTexts:RegisterTag("afk", { PLAYER_FLAGS_CHANGED = "unit" }, function(unit)
-	if UnitIsAFK(unit) then
+	if is_afk(unit) then
 		return _G.AFK
 	end
 	return nil
 end, L["AFK when the unit is away"])
 
 PitBull4_TagTexts:RegisterTag("dnd", { PLAYER_FLAGS_CHANGED = "unit" }, function(unit)
-	if UnitIsDND(unit) then
+	if is_dnd(unit) then
 		return _G.DND
 	end
 	return nil
 end, L["DND when the unit does not want to be disturbed"])
 
 PitBull4_TagTexts:RegisterTag("afkdnd", { PLAYER_FLAGS_CHANGED = "unit" }, function(unit)
-	if UnitIsAFK(unit) then
+	if is_afk(unit) then
 		return _G.AFK
-	elseif UnitIsDND(unit) then
+	elseif is_dnd(unit) then
 		return _G.DND
 	end
 	return nil
@@ -328,7 +362,7 @@ local CAST_EVENTS = {
 -- a format string cannot express.
 PitBull4_TagTexts:RegisterTag("castname", CAST_EVENTS, function(unit)
 	local name = UnitCastingInfo(unit)
-	if name then
+	if name ~= nil then
 		return name
 	end
 	return (UnitChannelInfo(unit))
@@ -441,11 +475,14 @@ PitBull4_TagTexts:RegisterModifier("classcolor", function(value, unit)
 	local _, class = UnitClass(unit)
 	local color
 	if class and issecretvalue(class) then
-		-- only Blizzard's colours can be looked up with a secret class
+		-- Only Blizzard's colours can be looked up with a secret class, and
+		-- the colour that comes back carries secret components, so the hex
+		-- code cannot be built here either: the engine wraps the text
+		-- (C_ColorUtil.WrapTextInColor, which takes secrets).
 		if C_ClassColor and C_ClassColor.GetClassColor then
 			color = C_ClassColor.GetClassColor(class)
-			if color then
-				return WrapString(value, format("|cff%02x%02x%02x", color:GetRGBAsBytes()), "|r")
+			if color and color.WrapTextInColorCode then
+				return color:WrapTextInColorCode(value)
 			end
 		end
 		return value
@@ -468,7 +505,11 @@ local function hostile_color(unit)
 			return colors.civilian
 		elseif UnitCanAttack("player", unit) then
 			return colors[NEUTRAL_REACTION]
-		elseif UnitIsPVP(unit) then
+		end
+		-- the flag is secret for a unit whose identity is restricted; it is
+		-- a friendly player either way, and gets the friendly colour
+		local pvp = UnitIsPVP(unit)
+		if issecretvalue(pvp) or pvp then
 			return colors[FRIENDLY_REACTION]
 		end
 		return colors.civilian

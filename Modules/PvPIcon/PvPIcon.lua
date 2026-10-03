@@ -4,6 +4,8 @@ local L = PitBull4.L
 
 local PitBull4_PvPIcon = PitBull4:NewModule("PvPIcon")
 
+local issecretvalue = _G.issecretvalue or function() return false end
+
 PitBull4_PvPIcon:SetModuleType("indicator")
 PitBull4_PvPIcon:SetName(L["PvP icon"])
 PitBull4_PvPIcon:SetDescription(L["Show an icon on the unit frame when the unit is in PvP mode."])
@@ -61,7 +63,15 @@ function PitBull4_PvPIcon:GetTexture(frame)
 			end
 		end
 		return [[Interface\TargetingFrame\UI-PVP-FFA]]
-	elseif faction and faction ~= "Neutral" and UnitIsPVP(unit) then
+	elseif faction and faction ~= "Neutral" then
+		-- The flag is a secret boolean for a unit whose identity is
+		-- restricted (anything outside the group inside an instance). It
+		-- cannot be tested, so such a unit gets no icon. The faction itself
+		-- is never secret.
+		local pvp = UnitIsPVP(unit)
+		if issecretvalue(pvp) or not pvp then
+			return nil
+		end
 		if ClassicExpansionAtLeast(LE_EXPANSION_LEGION) then
 			-- Handle "Mercenary Mode" for player
 			if unit == "player" and UnitIsMercenary(unit) then

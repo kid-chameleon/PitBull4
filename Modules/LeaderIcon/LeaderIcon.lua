@@ -5,6 +5,8 @@ local L = PitBull4.L
 
 local PitBull4_LeaderIcon = PitBull4:NewModule("LeaderIcon")
 
+local issecretvalue = _G.issecretvalue or function() return false end
+
 PitBull4_LeaderIcon:SetModuleType("indicator")
 PitBull4_LeaderIcon:SetName(L["Leader icon"])
 PitBull4_LeaderIcon:SetDescription(L["Show an icon on the unit frame when the unit is the group leader."])
@@ -46,7 +48,9 @@ local function update_leader_guid()
 			local group_unit_prefix = IsInRaid() and "raid" or "party"
 			for i = 1, group_size do
 				local unit = group_unit_prefix..i
-				if UnitIsGroupLeader(unit) then
+				local leader = UnitIsGroupLeader(unit)
+				-- secret for a member whose identity is restricted
+				if not issecretvalue(leader) and leader then
 					leader_guid = UnitGUID(unit)
 					break
 				end

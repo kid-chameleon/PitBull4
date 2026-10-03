@@ -5,6 +5,8 @@ local L = PitBull4.L
 
 local PitBull4_Border = PitBull4:NewModule("Border")
 
+local issecretvalue = _G.issecretvalue or function() return false end
+
 PitBull4_Border:SetModuleType("custom")
 PitBull4_Border:SetName(L["Border"])
 PitBull4_Border:SetDescription(L["Show a highlight when hovering or targeting."])
@@ -72,7 +74,9 @@ function PitBull4_Border:GetTextureAndColor(frame)
 		if UnitIsPlayer(unit) or UnitInPartyIsAI(unit) then
 			if db.color_by_class and (db.color_pvp_by_class or UnitIsFriend("player", unit)) then
 				local _, class = UnitClass(unit)
-				local t = PitBull4.ClassColors[class]
+				-- secret for a player whose identity is restricted, and a
+				-- secret cannot be a table key
+				local t = not issecretvalue(class) and PitBull4.ClassColors[class]
 				if t then
 					r, g, b = t[1], t[2], t[3]
 				end

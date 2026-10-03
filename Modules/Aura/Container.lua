@@ -13,6 +13,13 @@
 -- text -- is per-group styling applied once when a button is created, not per
 -- aura. Own auras are laid out first, as the module's own sort does.
 --
+-- The profile's maximum is for the two together, but a group's cap is its
+-- own and the engine has no cap across groups. The number of buttons a group
+-- holds is plain (GetAuraGroupFrameCount), so the module's update tick gives
+-- the others' group whatever the player's own auras leave of the maximum.
+-- The tick runs every 0.2s and the engine assigns buttons on its own next
+-- update, so for a moment after an aura appears there can be one icon too many.
+--
 -- Rules for engine-placed buttons, from the Bufflehead port (its
 -- doc/forever-support.md §11.3):
 --   * setters only, never read a button's geometry back: the flow layout
@@ -252,6 +259,23 @@ local function group_options(frame, kind, who, db)
 	}
 end
 
+-- Give the others' group what the player's own leave of the maximum.
+local function balance_groups(container)
+	local max_frames = container.pb4_max_frames
+	if not max_frames then
+		return
+	end
+	local mine = container:GetAuraGroupFrameCount("mine")
+	local other = max_frames - mine
+	if other < 0 then
+		other = 0
+	end
+	if container.pb4_other_max ~= other then
+		container.pb4_other_max = other
+		container:SetAuraGroupMaxFrameCount("other", other)
+	end
+end
+
 local function create_container(frame, kind)
 	local db = PitBull4_Aura:GetLayoutDB(frame)
 	local container = CreateFrame("AuraContainer", nil, frame, "CustomAuraContainerTemplate")
@@ -311,9 +335,13 @@ local function update_container(container, frame, kind)
 			-- the player's own auras first, as the module's own sort does
 			layoutIndex = who == "mine" and 1 or 2,
 		})
-		container:SetAuraGroupMaxFrameCount(who, max_frames)
 		container:SetAuraGroupSortMethod(who, sort_method, sort_direction)
 	end
+	-- the player's own auras take the maximum first, the others get the rest
+	container:SetAuraGroupMaxFrameCount("mine", max_frames)
+	container.pb4_max_frames = max_frames
+	container.pb4_other_max = nil
+	balance_groups(container)
 
 	container:SetFlowLayoutMaximumLineSize(line_extent(frame, db, kind, not growth.horizontal))
 	container:Show()
@@ -587,5 +615,14 @@ end
 function PitBull4_Aura:UpdateCooldownTexts(elapsed)
 	return nil
 end
+
+-- The module's tick (every 0.2s while any frame shows auras). The only thing
+-- left for it to do here is keep the two groups of each shown container within
+-- the one maximum, see balance_groups.
 function PitBull4_Aura:OnUpdate()
+	for container in pairs(containers) do
+		if container:IsShown() then
+			balance_groups(container)
+		end
+	end
 end

@@ -15,8 +15,12 @@ end
 local PitBull4_Portrait = PitBull4:NewModule("Portrait")
 
 -- Secret values (WoW: Forever): a 3D portrait needs the unit's identity
--- declassified and a class portrait needs the class as a table key, so both
--- fall back to the placeholder for a unit whose identity is restricted.
+-- declassified (PlayerModel:SetUnit is RequiresDeclassifiedUnitIdentity) and
+-- a class portrait needs the class as a table key, so neither can be drawn
+-- for a unit whose identity is restricted, which inside an instance is every
+-- unit outside the group. SetPortraitTexture has no such requirement, the
+-- same as Blizzard's own frames use, so both styles fall back to the 2D
+-- portrait for such a unit rather than to the placeholder.
 local has_secrets = PitBull4.has_secrets
 local issecretvalue = _G.issecretvalue or function() return false end
 local ShouldUnitIdentityBeSecret = C_Secrets and C_Secrets.ShouldUnitIdentityBeSecret
@@ -119,6 +123,10 @@ function PitBull4_Portrait:UpdateFrame(frame)
 		return self:ClearFrame(frame)
 	end
 
+	if (style == "three_dimensional" or style == "class") and identity_secret(unit) then
+		style = "two_dimensional"
+	end
+
 	local portrait = frame.Portrait
 
 	if portrait and portrait.style ~= style then
@@ -181,7 +189,7 @@ function PitBull4_Portrait:UpdateFrame(frame)
 		end
 	elseif style == "two_dimensional" then
 		portrait.texture:SetTexCoord(0.14644660941, 0.85355339059, 0.14644660941, 0.85355339059)
-		if unit and not identity_secret(unit) then
+		if unit then
 			SetPortraitTexture(portrait.texture, unit)
 		else
 			-- No unit so just use a blank portrait

@@ -4,6 +4,8 @@ local L = PitBull4.L
 
 local PitBull4_PhaseFader = PitBull4:NewModule("PhaseFader")
 
+local issecretvalue = _G.issecretvalue or function() return false end
+
 -- Forever reports the vanilla expansion level but ships the modern
 -- UnitPhaseReason and no UnitInPhase, so pick by what the client provides
 -- rather than by the expansion. The reason is secret for a unit outside the
@@ -43,7 +45,10 @@ function PitBull4_PhaseFader:GetOpacity(frame)
 		return nil
 	end
 
-	if not phase_reason(unit) then
+	-- the reason is secret for a player whose identity is restricted, but a
+	-- unit that is not phased gets a plain nil, so a secret means phased
+	local reason = phase_reason(unit)
+	if not issecretvalue(reason) and not reason then
 		return nil
 	end
 
