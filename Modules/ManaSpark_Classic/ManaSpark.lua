@@ -24,10 +24,36 @@ local SPELL_POWER_MANA = Enum.PowerType.Mana
 local MANA_REGEN_TIME = 5
 local INVERSE_MANA_REGEN_TIME = 1 / MANA_REGEN_TIME
 
--- Secret values (WoW: Forever): mana is unreadable, so a successful cast is
--- taken as the start of the five-second rule without checking that it cost
--- mana, and the spark is not hidden at full mana.
+-- Secret values (WoW: Forever): mana is unreadable, so a successful cast
+-- starts the five-second rule when the spell's cost table lists a mana cost
+-- (the mana value itself cannot be watched), and the spark is not hidden at
+-- full mana.
 local has_secrets = PitBull4.has_secrets
+local issecretvalue = _G.issecretvalue or function() return false end
+local GetSpellPowerCost = C_Spell and C_Spell.GetSpellPowerCost
+
+-- Whether a cast spends mana, read from the spell's power cost table. When
+-- that cannot be known (no API, or a secret spell id or cost) the cast is
+-- treated as a mana spend so the spark errs on the side of showing.
+local function spell_costs_mana(spell_id)
+	if not GetSpellPowerCost or not spell_id or issecretvalue(spell_id) then
+		return true
+	end
+	local costs = GetSpellPowerCost(spell_id)
+	if not costs then
+		return false
+	end
+	for _, cost_info in ipairs(costs) do
+		local power_type, cost = cost_info.type, cost_info.cost
+		if issecretvalue(power_type) or issecretvalue(cost) then
+			return true
+		end
+		if power_type == SPELL_POWER_MANA and cost > 0 then
+			return true
+		end
+	end
+	return false
+end
 
 local current_mana = 0
 local last_spellcast = 0
@@ -152,11 +178,15 @@ function PitBull4_ManaSpark:UNIT_POWER_FREQUENT(_, unit, power_type)
 	current_mana = new_mana
 end
 
-function PitBull4_ManaSpark:UNIT_SPELLCAST_SUCCEEDED(_, unit)
+function PitBull4_ManaSpark:UNIT_SPELLCAST_SUCCEEDED(_, unit, _, spell_id)
 	if unit ~= "player" then return end
 
 	if has_secrets then
-		spellcast_finish_time = GetTime()
+		-- a free cast (Totemic Recall, a cooldown reset, ...) must not start
+		-- or restart the five-second rule
+		if spell_costs_mana(spell_id) then
+			spellcast_finish_time = GetTime()
+		end
 		return
 	end
 	last_spellcast = GetTime()
