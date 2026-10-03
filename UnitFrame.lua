@@ -404,6 +404,15 @@ local function register_for_clicks_helper(frame, clicks)
 end
 register_for_clicks_helper = PitBull4:OutOfCombatWrapper(register_for_clicks_helper)
 
+-- SetClampedToScreen is a protected call on secure frames while in combat
+-- and isn't available in the RestrictedFrames environment. Group headers
+-- create new member frames during combat (e.g. someone joining the party),
+-- so the clamp has to wait until combat ends for those frames.
+local function set_clamped_to_screen_helper(frame)
+	frame:SetClampedToScreen(true)
+end
+set_clamped_to_screen_helper = PitBull4:OutOfCombatWrapper(set_clamped_to_screen_helper)
+
 --- Add the proper functions and scripts to a SecureUnitButton, as well as some various initialization.
 -- @param frame a Button which inherits from SecureUnitButton
 -- @param isExampleFrame whether the button is an example frame, thus not a real unit frame
@@ -472,7 +481,11 @@ function PitBull4:ConvertIntoUnitFrame(frame, isExampleFrame)
 	end
 	frame:RefreshVehicle()
 
-	frame:SetClampedToScreen(true)
+	if frame:CanChangeProtectedState() then
+		frame:SetClampedToScreen(true)
+	else
+		set_clamped_to_screen_helper(frame)
+	end
 
 	if frame.is_singleton then
 		if not frame.classification_db.click_through then

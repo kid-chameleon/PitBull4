@@ -327,6 +327,192 @@ local function update_container(container, frame, kind)
 end
 
 -----------------------------------------------------------------------------
+-- Highlight
+-----------------------------------------------------------------------------
+-- The module colours the whole frame when an aura passes one of the layout's
+-- highlight filters. The filters cannot run here, but what the highlight
+-- needs is presence without values, and that is what an aura slot gives: the
+-- engine assigns the preferred matching aura to the slot's frame and shows
+-- it, or hides it when nothing matches. The slot's frame is laid over the
+-- unit frame carrying the highlight texture, coloured by dispel type through
+-- the same mechanism as the icon borders.
+--
+-- Only the built-in highlight filters that reduce to a side of the player
+-- and a set of dispel types can be expressed:
+--   !H dispellable by me debuffs   friend, HARMFUL, what the class can dispel
+--   !G dispellable debuffs         friend, HARMFUL, every dispel type
+--   !L purgeable by me buffs       enemy, HELPFUL, what the class can purge
+--   !K purgeable buffs             enemy, HELPFUL, Magic and Enrage
+-- !I and !J match aura names from a user list and a custom filter can be
+-- anything; the engine can do neither, so those are skipped.
+--
+-- A side gets one slot. Each dispel type is claimed by the first filter in
+-- the list that covers it, which decides whether it is coloured by type or
+-- with that filter's custom colour. When a unit carries auras of several
+-- claimed types the engine's default order picks the one shown, where the
+-- module would have gone by filter order.
+
+local HIGHLIGHT_TEXTURE = {
+	border = [[Interface\AddOns\PitBull4\Modules\Aura\HighlightBorder]],
+	thinborder = [[Interface\AddOns\PitBull4\Modules\Aura\HighlightThinBorder]],
+	normal = [[Interface\AddOns\PitBull4\Modules\Aura\HighlightNormal]],
+}
+
+local DISPELLABLE_TYPES = { Magic = true, Curse = true, Disease = true, Poison = true, Enrage = true }
+local PURGEABLE_TYPES = { Magic = true, Enrage = true }
+
+local HIGHLIGHT_FILTERS = {
+	["!H"] = { side = "friend", filter = "HARMFUL", types = function() return PitBull4_Aura.can_dispel.player end },
+	["!G"] = { side = "friend", filter = "HARMFUL", types = DISPELLABLE_TYPES },
+	["!L"] = { side = "enemy", filter = "HELPFUL", types = function() return PitBull4_Aura.can_purge.player end },
+	["!K"] = { side = "enemy", filter = "HELPFUL", types = PURGEABLE_TYPES },
+}
+
+-- The engine reports an enrage effect with an empty dispel name; the module
+-- calls it Enrage, and the type colours are keyed that way.
+local ENGINE_TYPE = { Enrage = "" }
+
+-- What each side watches for a layout: the filter string, the dispel types
+-- to admit and a colour for each. nil when no filter can be expressed.
+local function highlight_sides(db)
+	local type_colors = PitBull4_Aura.db.profile.global.colors.type
+	local filters = db.highlight_filters
+	local sides
+	for id = 1, #filters do
+		local spec = HIGHLIGHT_FILTERS[filters[id]]
+		if spec then
+			local types = spec.types
+			if type(types) == "function" then
+				types = types()
+			end
+			local custom = not db.highlight_filters_color_by_type[id] and db.highlight_filters_custom_color[id]
+			for name, enabled in pairs(types or {}) do
+				if enabled then
+					sides = sides or {}
+					local side = sides[spec.side]
+					if not side then
+						side = { filter = spec.filter, types = {}, colors = {} }
+						sides[spec.side] = side
+					end
+					if not side.types[name] then
+						local color = custom or type_colors[name] or type_colors["nil"]
+						color = CreateColor(color[1], color[2], color[3], color[4] or 1)
+						side.types[name] = true
+						side.colors[name] = color
+						local engine_name = ENGINE_TYPE[name]
+						if engine_name then
+							side.types[engine_name] = true
+							side.colors[engine_name] = color
+						end
+					end
+				end
+			end
+		end
+	end
+	return sides
+end
+
+-- Slot frames cannot be restyled once the engine owns them, so a container
+-- is built for one configuration and replaced when that changes.
+local function highlight_key(db, sides)
+	local parts = { db.highlight_style or "normal" }
+	for _, side_name in ipairs({ "friend", "enemy" }) do
+		local side = sides[side_name]
+		if side then
+			parts[#parts + 1] = side_name .. ":" .. side.filter
+			local names = {}
+			for name in pairs(side.types) do
+				names[#names + 1] = name
+			end
+			table.sort(names)
+			for _, name in ipairs(names) do
+				parts[#parts + 1] = name .. "=" .. side.colors[name]:GenerateHexColor()
+			end
+		end
+	end
+	return table.concat(parts, "/")
+end
+
+-- Runs inside initializeFrame, like build_button.
+local function build_highlight(button, frame, style, colors)
+	-- the unit frame beneath takes the clicks
+	button:EnableMouse(false)
+	button:SetAllPoints(frame)
+
+	local texture = button:CreateTexture(nil, "OVERLAY")
+	texture:SetTexture(HIGHLIGHT_TEXTURE[style] or HIGHLIGHT_TEXTURE.normal)
+	texture:SetBlendMode("ADD")
+	texture:SetAlpha(0.75)
+	texture:SetAllPoints(button)
+	button:AddDispelTypeTexture(texture, {
+		style = DISPEL_STYLE and DISPEL_STYLE.PreserveAsset,
+		customDispelColorMap = colors,
+		showWhenHarmful = true,
+		showWhenHelpful = true,
+		showWithoutDispelType = true,
+	})
+end
+
+local function create_highlight(frame, db, sides, key)
+	-- parented to the overlay so it draws above the bars, as the module's
+	-- own highlight texture does; the slot frames anchor to the unit frame,
+	-- the container's own rect is irrelevant
+	local container = CreateFrame("AuraContainer", nil, frame.overlay, "CustomAuraContainerTemplate")
+	container.pb4_key = key
+	container.pb4_sides = sides
+	container:SetPoint("TOPLEFT", frame, "TOPLEFT")
+	container:SetUnit(frame.unit)
+
+	local style = db.highlight_style
+	for side_name, side in pairs(sides) do
+		container:AddAuraSlot(side_name, side.filter, {
+			candidateFilters = { includeDispelTypes = side.types },
+			initializeFrame = function(button)
+				build_highlight(button, frame, style, side.colors)
+			end,
+		})
+	end
+	return container
+end
+
+local function update_highlight(frame, db)
+	local container = frame.aura_highlight_container
+	local sides = db.highlight and highlight_sides(db)
+	local key = sides and highlight_key(db, sides)
+	if container and container.pb4_key ~= key then
+		container:Hide()
+		container = nil
+	end
+	if not key then
+		return
+	end
+	if not container then
+		container = create_highlight(frame, db, sides, key)
+		frame.aura_highlight_container = container
+	end
+
+	container:SetUnit(frame.unit)
+	-- only the side the unit is on watches; whether it is a friend is never
+	-- secret
+	local friend = UnitIsFriend("player", frame.unit) and true or false
+	if container.pb4_friend ~= friend then
+		container.pb4_friend = friend
+		for side_name in pairs(container.pb4_sides) do
+			container:SetAuraSlotEnabled(side_name, (side_name == "friend") == friend)
+		end
+	end
+	container:Show()
+	container:UpdateAllAuras()
+end
+
+-- Learning a dispel changes what the friend slot admits.
+local talent_update = PitBull4_Aura.PLAYER_TALENT_UPDATE
+function PitBull4_Aura:PLAYER_TALENT_UPDATE(...)
+	talent_update(self, ...)
+	self:UpdateAll()
+end
+
+-----------------------------------------------------------------------------
 -- Module contract
 -----------------------------------------------------------------------------
 
@@ -361,9 +547,15 @@ function PitBull4_Aura:UpdateFrame(frame)
 		update_container(container, frame, kind)
 	end)
 	frame.aura_containers = frame_containers
+
+	update_highlight(frame, PitBull4_Aura:GetLayoutDB(frame))
 end
 
 function PitBull4_Aura:ClearFrame(frame)
+	local highlight = frame.aura_highlight_container
+	if highlight then
+		highlight:Hide()
+	end
 	local frame_containers = frame.aura_containers
 	if not frame_containers then
 		return
