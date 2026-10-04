@@ -6,19 +6,29 @@
 -- under secrets this file replaces the module's :UpdateFrame and :ClearFrame
 -- with an AuraContainer per unit frame per kind.
 --
--- Each container holds two aura groups, the player's own auras and everyone
+-- Each container holds aura groups for the player's own auras and everyone
 -- else's, split by the PLAYER component of the filter string. They have to be
 -- separate groups rather than one sorted list because every difference between
 -- "my" and "other" auras in the profile -- size, border colour, cooldown,
 -- text -- is per-group styling applied once when a button is created, not per
 -- aura. Own auras are laid out first, as the module's own sort does.
 --
--- The profile's maximum is for the two together, but a group's cap is its
--- own and the engine has no cap across groups. The number of buttons a group
--- holds is plain (GetAuraGroupFrameCount), so the module's update tick gives
--- the others' group whatever the player's own auras leave of the maximum.
--- The tick runs every 0.2s and the engine assigns buttons on its own next
--- update, so for a moment after an aura appears there can be one icon too many.
+-- The border settings also differ by whether the unit is a friend, which is
+-- never secret but changes under a frame as its target changes, and a button
+-- cannot be restyled once the engine owns it. So each of the two groups exists
+-- twice, styled for a friend and for an enemy, and only the pair for the
+-- unit's current side is enabled; a disabled group holds no auras and takes
+-- no room in the layout.
+--
+-- The profile's maximum is for own and others' auras together, but a group's
+-- cap is its own and the engine has no cap across groups, nor any way to
+-- learn how many auras a group shows: GetAuraGroupFrameCount counts the
+-- buttons a group has allocated, in batches of ten, and the set in use is
+-- private, deliberately ("to make it harder to observe the transition between
+-- zero/non-zero auras"). So each group gets the whole maximum and together
+-- they can show up to twice it. A single group sorted with the engine's
+-- default order (the player's auras first) would honour the maximum exactly,
+-- at the cost of every difference in styling between own and others' auras.
 --
 -- Rules for engine-placed buttons, from the Bufflehead port (its
 -- doc/forever-support.md §11.3):
@@ -51,8 +61,15 @@ local CATEGORY = {
 	buff = { mine = "my_buffs", other = "other_buffs" },
 	debuff = { mine = "my_debuffs", other = "other_debuffs" },
 }
--- "cast by me" is the PLAYER component of the filter string
+-- "cast by me" is the PLAYER component of the filter string, which the
+-- engine defines as cast by the player, their pet or their vehicle: the same
+-- set as the module's own my_units
 local WHO_FILTER = { mine = "PLAYER", other = "!PLAYER" }
+-- the border settings are chosen by the side the unit is on
+local SIDES = { "friend", "enemy" }
+local function group_key(who, side)
+	return who .. "_" .. side
+end
 
 -- The module anchors the grid by a corner of the frame and a side to sit on,
 -- and the corner of the grid that meets them is the opposite one, so the grid
@@ -124,7 +141,9 @@ local function dispel_color_map()
 		return nil
 	end
 	local map = {}
-	for key, name in pairs({ Magic = "Magic", Curse = "Curse", Disease = "Disease", Poison = "Poison", None = "nil" }) do
+	-- keyed as the engine keys them: the dispel name, "None" for no type, and
+	-- the empty string for an enrage effect, which the module calls Enrage
+	for key, name in pairs({ Magic = "Magic", Curse = "Curse", Disease = "Disease", Poison = "Poison", None = "nil", [""] = "Enrage" }) do
 		local color = colors[name]
 		if color then
 			map[key] = CreateColor(color[1], color[2], color[3], color[4] or 1)
@@ -140,15 +159,12 @@ end
 -- Build one aura button. Runs inside initializeFrame, which the engine calls
 -- when it needs another button, possibly in combat, and which is the only
 -- place a button may be given regions and anchors.
-local function build_button(button, frame, kind, who)
+local function build_button(button, frame, kind, who, side)
 	-- everything but the colour table is per layout
 	local db = PitBull4_Aura:GetLayoutDB(frame)
 	local colors = PitBull4_Aura.db.profile.global.colors
 	local category = CATEGORY[kind][who]
 	local size = icon_size(db, kind, who)
-	-- which border settings apply depends on whether the unit is friendly,
-	-- which is never secret
-	local friendly = UnitIsFriend("player", frame.unit) and "friend" or "enemy"
 
 	button:SetSize(size, size)
 
@@ -165,7 +181,7 @@ local function build_button(button, frame, kind, who)
 	-- because the group is defined by who cast its auras.
 	local border_db = db.borders and db.borders[category]
 	if border_db then
-		local friend_db = border_db[friendly] or border_db
+		local friend_db = border_db[side] or border_db
 		if friend_db.enabled then
 			local border = button:CreateTexture(nil, "OVERLAY")
 			border:SetTexture(BORDER_TEXTURE)
@@ -175,9 +191,13 @@ local function build_button(button, frame, kind, who)
 
 			local color_type = friend_db.color_type
 			if color_type == "type" and button.AddDispelTypeTexture then
+				-- the engine shows a dispel texture for debuffs only unless
+				-- told otherwise; the module colours buffs by type too
 				button:AddDispelTypeTexture(border, {
 					style = DISPEL_STYLE and DISPEL_STYLE.PreserveAsset,
 					customDispelColorMap = dispel_color_map(),
+					showWhenHarmful = true,
+					showWhenHelpful = true,
 					showWithoutDispelType = true,
 				})
 			elseif color_type == "custom" and friend_db.custom_color then
@@ -250,30 +270,13 @@ end
 -- Containers
 -----------------------------------------------------------------------------
 
-local function group_options(frame, kind, who, db)
+local function group_options(frame, kind, who, side, db)
 	return {
 		maxFrameCount = kind == "buff" and db.max_buffs or db.max_debuffs,
 		initializeFrame = function(button)
-			build_button(button, frame, kind, who)
+			build_button(button, frame, kind, who, side)
 		end,
 	}
-end
-
--- Give the others' group what the player's own leave of the maximum.
-local function balance_groups(container)
-	local max_frames = container.pb4_max_frames
-	if not max_frames then
-		return
-	end
-	local mine = container:GetAuraGroupFrameCount("mine")
-	local other = max_frames - mine
-	if other < 0 then
-		other = 0
-	end
-	if container.pb4_other_max ~= other then
-		container.pb4_other_max = other
-		container:SetAuraGroupMaxFrameCount("other", other)
-	end
 end
 
 local function create_container(frame, kind)
@@ -283,8 +286,10 @@ local function create_container(frame, kind)
 	container.pb4_kind = kind
 	container:SetUnit(frame.unit)
 
-	for who in pairs(WHO_FILTER) do
-		container:AddAuraGroup(who, KIND_FILTER[kind], group_options(frame, kind, who, db))
+	for _, side in ipairs(SIDES) do
+		for who in pairs(WHO_FILTER) do
+			container:AddAuraGroup(group_key(who, side), KIND_FILTER[kind], group_options(frame, kind, who, side, db))
+		end
 	end
 
 	containers[container] = true
@@ -322,26 +327,30 @@ local function update_container(container, frame, kind)
 		spacing, line_spacing = line_spacing, spacing
 	end
 
-	for who, who_filter in pairs(WHO_FILTER) do
-		local size = icon_size(db, kind, who)
-		container:SetAuraGroupFilterString(who, ("%s|%s"):format(KIND_FILTER[kind], who_filter))
-		container:SetAuraGroupLayout(who, {
-			elementSpacing = spacing,
-			lineSpacing = line_spacing,
-			groupSpacing = spacing,
-			groupLineSpacing = line_spacing,
-			elementWidth = size,
-			elementHeight = size,
-			-- the player's own auras first, as the module's own sort does
-			layoutIndex = who == "mine" and 1 or 2,
-		})
-		container:SetAuraGroupSortMethod(who, sort_method, sort_direction)
+	-- whether the unit is a friend is never secret
+	local side = UnitIsFriend("player", frame.unit) and "friend" or "enemy"
+	for _, group_side in ipairs(SIDES) do
+		for who, who_filter in pairs(WHO_FILTER) do
+			local key = group_key(who, group_side)
+			local size = icon_size(db, kind, who)
+			container:SetAuraGroupFilterString(key, ("%s|%s"):format(KIND_FILTER[kind], who_filter))
+			container:SetAuraGroupLayout(key, {
+				elementSpacing = spacing,
+				lineSpacing = line_spacing,
+				groupSpacing = spacing,
+				groupLineSpacing = line_spacing,
+				elementWidth = size,
+				elementHeight = size,
+				-- the player's own auras first, as the module's own sort does
+				layoutIndex = who == "mine" and 1 or 2,
+			})
+			container:SetAuraGroupSortMethod(key, sort_method, sort_direction)
+			container:SetAuraGroupMaxFrameCount(key, max_frames)
+			-- only the groups styled for the unit's side show anything
+			container:SetAuraGroupEnabled(key, group_side == side)
+		end
 	end
-	-- the player's own auras take the maximum first, the others get the rest
-	container:SetAuraGroupMaxFrameCount("mine", max_frames)
-	container.pb4_max_frames = max_frames
-	container.pb4_other_max = nil
-	balance_groups(container)
+	container.pb4_side = side
 
 	container:SetFlowLayoutMaximumLineSize(line_extent(frame, db, kind, not growth.horizontal))
 	container:Show()
@@ -615,14 +624,5 @@ end
 function PitBull4_Aura:UpdateCooldownTexts(elapsed)
 	return nil
 end
-
--- The module's tick (every 0.2s while any frame shows auras). The only thing
--- left for it to do here is keep the two groups of each shown container within
--- the one maximum, see balance_groups.
 function PitBull4_Aura:OnUpdate()
-	for container in pairs(containers) do
-		if container:IsShown() then
-			balance_groups(container)
-		end
-	end
 end

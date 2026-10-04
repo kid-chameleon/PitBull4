@@ -262,8 +262,15 @@ PitBull4_TagTexts:RegisterTag("class", {}, function(unit, frame, style)
 		return class
 	end
 	if issecretvalue(class_id) then
-		-- only a player's identity is ever restricted, so this is a class
-		return class
+		-- The id cannot be tested, and inside an instance every unit outside
+		-- the group is restricted, creatures included, so the first value may
+		-- again be the creature's own name. Nor can it be compared with the
+		-- name, which is just as secret. Whether the unit is a player is
+		-- plain, and a player's class is always a real one.
+		if is_player(unit) then
+			return class
+		end
+		return nil
 	end
 	if class_id then
 		local info = C_CreatureInfo.GetClassInfo(class_id)
