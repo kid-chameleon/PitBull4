@@ -23,12 +23,31 @@
 -- The profile's maximum is for own and others' auras together, but a group's
 -- cap is its own and the engine has no cap across groups, nor any way to
 -- learn how many auras a group shows: GetAuraGroupFrameCount counts the
--- buttons a group has allocated, in batches of ten, and the set in use is
+-- buttons a group has allocated, in batches of ten, the set in use is
 -- private, deliberately ("to make it harder to observe the transition between
--- zero/non-zero auras"). So each group gets the whole maximum and together
--- they can show up to twice it. A single group sorted with the engine's
--- default order (the player's auras first) would honour the maximum exactly,
--- at the cost of every difference in styling between own and others' auras.
+-- zero/non-zero auras"), and the buttons forbid untrusted script handlers, so
+-- OnShow cannot be hooked to count them either. The layout chooses how to
+-- live with that (secret_max_mode):
+--   soft     own and others' auras each get the whole maximum, so together
+--            they can show up to twice it;
+--   reserve  own auras get the maximum and others' get the maximum less
+--            secret_max_reserve, so the total stays within the maximum
+--            unless the unit carries more own auras than were reserved;
+--   merge    one group for both, sorted with the engine's default order (the
+--            player's auras first), which honours the maximum exactly at the
+--            cost of every difference in styling between own and others'
+--            auras.
+--
+-- Group membership is decided by the engine twice over: a full scan reads
+-- each group's filter string through C_UnitAuras.GetUnitAuraInstanceIDs, and
+-- an incremental UNIT_AURA update tests each added or changed aura against
+-- the same string through C_UnitAuras.IsAuraFilteredOutByInstanceID. In the
+-- field the two have disagreed on the PLAYER component: a party member's
+-- own Find Herbs landed in the "mine" group with its styling, and an aura
+-- that both calls admitted showed twice. The module therefore asks the
+-- container for a full rebuild on every UNIT_AURA of its unit; the rebuild
+-- runs in the same frame as the engine's own incremental pass and replaces
+-- its result, so only the scan ever decides what is shown.
 --
 -- Rules for engine-placed buttons, from the Bufflehead port (its
 -- doc/forever-support.md §11.3):
@@ -65,6 +84,27 @@ local CATEGORY = {
 -- engine defines as cast by the player, their pet or their vehicle: the same
 -- set as the module's own my_units
 local WHO_FILTER = { mine = "PLAYER", other = "!PLAYER" }
+-- the merge mode has one group with no caster component
+local WHO_MERGED = { all = false }
+local function who_filters(mode)
+	return mode == "merge" and WHO_MERGED or WHO_FILTER
+end
+-- a merged group is styled as others' auras are
+local function style_who(who)
+	return who == "all" and "other" or who
+end
+local MAX_MODES = { soft = true, reserve = true, merge = true }
+local function max_mode(db)
+	local mode = db.secret_max_mode
+	return MAX_MODES[mode] and mode or "soft"
+end
+local function group_cap(db, kind, who, mode)
+	local max = kind == "buff" and db.max_buffs or db.max_debuffs
+	if who == "other" and mode == "reserve" then
+		return math.max(0, max - (db.secret_max_reserve or 0))
+	end
+	return max
+end
 -- the border settings are chosen by the side the unit is on
 local SIDES = { "friend", "enemy" }
 local function group_key(who, side)
@@ -163,6 +203,9 @@ local function build_button(button, frame, kind, who, side)
 	-- everything but the colour table is per layout
 	local db = PitBull4_Aura:GetLayoutDB(frame)
 	local colors = PitBull4_Aura.db.profile.global.colors
+	-- a merged group can only be styled one way; it takes the others' settings
+	local cancel = who ~= "other"
+	who = style_who(who)
 	local category = CATEGORY[kind][who]
 	local size = icon_size(db, kind, who)
 
@@ -260,7 +303,7 @@ local function build_button(button, frame, kind, who, side)
 		button:SetTooltipAnchorPoint("ANCHOR_BOTTOMRIGHT", 0, 0)
 		-- cancelling is only ever offered for the player's own buffs, and the
 		-- engine does it without the addon seeing the aura
-		if kind == "buff" and who == "mine" and frame.unit == "player" then
+		if kind == "buff" and cancel and frame.unit == "player" then
 			button:SetCancelAuraButtons(CANCEL_BUTTONS)
 		end
 	end
@@ -270,25 +313,29 @@ end
 -- Containers
 -----------------------------------------------------------------------------
 
-local function group_options(frame, kind, who, side, db)
+local function group_options(frame, kind, who, side, db, mode)
 	return {
-		maxFrameCount = kind == "buff" and db.max_buffs or db.max_debuffs,
+		maxFrameCount = group_cap(db, kind, who, mode),
 		initializeFrame = function(button)
 			build_button(button, frame, kind, who, side)
 		end,
 	}
 end
 
-local function create_container(frame, kind)
+-- A container's groups are fixed once added, so it is built for one maximum
+-- mode and replaced when the layout changes it; the old one keeps its buttons
+-- but is hidden and forgotten.
+local function create_container(frame, kind, mode)
 	local db = PitBull4_Aura:GetLayoutDB(frame)
 	local container = CreateFrame("AuraContainer", nil, frame, "CustomAuraContainerTemplate")
 	container.pb4_frame = frame
 	container.pb4_kind = kind
+	container.pb4_mode = mode
 	container:SetUnit(frame.unit)
 
 	for _, side in ipairs(SIDES) do
-		for who in pairs(WHO_FILTER) do
-			container:AddAuraGroup(group_key(who, side), KIND_FILTER[kind], group_options(frame, kind, who, side, db))
+		for who in pairs(who_filters(mode)) do
+			container:AddAuraGroup(group_key(who, side), KIND_FILTER[kind], group_options(frame, kind, who, side, db, mode))
 		end
 	end
 
@@ -318,9 +365,12 @@ local function update_container(container, frame, kind)
 
 	-- these are globals from Blizzard_AuraContainer, looked up when needed
 	local methods, directions = _G.AuraContainerSortMethod, _G.AuraContainerSortDirection
-	local sort_method = layout_db.sort and methods.Name or methods.AuraInstanceIDOnly
+	local mode = container.pb4_mode
+	-- a merged group relies on the engine's default order to put the player's
+	-- auras first; sorting by name gives that up
+	local unsorted = mode == "merge" and methods.Default or methods.AuraInstanceIDOnly
+	local sort_method = layout_db.sort and methods.Name or unsorted
 	local sort_direction = layout_db.reverse and directions.Reverse or directions.Normal
-	local max_frames = kind == "buff" and db.max_buffs or db.max_debuffs
 
 	local spacing, line_spacing = layout_db.col_spacing or 0, layout_db.row_spacing or 0
 	if not growth.horizontal then
@@ -330,10 +380,14 @@ local function update_container(container, frame, kind)
 	-- whether the unit is a friend is never secret
 	local side = UnitIsFriend("player", frame.unit) and "friend" or "enemy"
 	for _, group_side in ipairs(SIDES) do
-		for who, who_filter in pairs(WHO_FILTER) do
+		for who, who_filter in pairs(who_filters(mode)) do
 			local key = group_key(who, group_side)
-			local size = icon_size(db, kind, who)
-			container:SetAuraGroupFilterString(key, ("%s|%s"):format(KIND_FILTER[kind], who_filter))
+			local size = icon_size(db, kind, style_who(who))
+			local filter = KIND_FILTER[kind]
+			if who_filter then
+				filter = ("%s|%s"):format(filter, who_filter)
+			end
+			container:SetAuraGroupFilterString(key, filter)
 			container:SetAuraGroupLayout(key, {
 				elementSpacing = spacing,
 				lineSpacing = line_spacing,
@@ -342,10 +396,10 @@ local function update_container(container, frame, kind)
 				elementWidth = size,
 				elementHeight = size,
 				-- the player's own auras first, as the module's own sort does
-				layoutIndex = who == "mine" and 1 or 2,
+				layoutIndex = who == "other" and 2 or 1,
 			})
 			container:SetAuraGroupSortMethod(key, sort_method, sort_direction)
-			container:SetAuraGroupMaxFrameCount(key, max_frames)
+			container:SetAuraGroupMaxFrameCount(key, group_cap(db, kind, who, mode))
 			-- only the groups styled for the unit's side show anything
 			container:SetAuraGroupEnabled(key, group_side == side)
 		end
@@ -566,6 +620,7 @@ function PitBull4_Aura:UpdateFrame(frame)
 		return self:ClearFrame(frame)
 	end
 
+	local mode = max_mode(self:GetLayoutDB(frame))
 	local frame_containers = frame.aura_containers
 	each_kind(frame, function(kind, wanted)
 		local container = frame_containers and frame_containers[kind]
@@ -575,8 +630,13 @@ function PitBull4_Aura:UpdateFrame(frame)
 			end
 			return
 		end
+		if container and container.pb4_mode ~= mode then
+			container:Hide()
+			containers[container] = nil
+			container = nil
+		end
 		if not container then
-			container = create_container(frame, kind)
+			container = create_container(frame, kind, mode)
 			frame_containers = frame_containers or {}
 			frame_containers[kind] = container
 		end
@@ -604,10 +664,42 @@ end
 
 PitBull4_Aura.OnHide = PitBull4_Aura.ClearFrame
 
--- The module registers this event and its own handler reads aura data, which
--- is impossible here. Each container registers UNIT_AURA for its own unit and
--- refreshes itself, so there is nothing to do.
+local function rebuild_auras(frame)
+	local frame_containers = frame.aura_containers
+	if frame_containers then
+		for _, container in pairs(frame_containers) do
+			if container:IsShown() then
+				container:UpdateAllAuras()
+			end
+		end
+	end
+	local highlight = frame.aura_highlight_container
+	if highlight and highlight:IsShown() then
+		highlight:UpdateAllAuras()
+	end
+end
+
+-- The module's own handler reads aura data, which is impossible here. Each
+-- container watches UNIT_AURA for its unit and applies the update on its own;
+-- this asks it for a full rebuild instead, for the reason given at the top.
 function PitBull4_Aura:UNIT_AURA(event, unit)
+	if not PitBull4.Utils.GetBestUnitID(unit) then
+		return
+	end
+	for frame in PitBull4:IterateFramesForUnitID(unit) do
+		rebuild_auras(frame)
+	end
+end
+
+-- Units like targettarget fire no UNIT_AURA, for the container as much as
+-- for the module, so their frames are rebuilt from the module's tick as the
+-- normal path rescans them.
+function PitBull4_Aura:OnUpdate()
+	for frame in pairs(PitBull4.wacky_frames) do
+		if frame.unit and frame.guid then
+			rebuild_auras(frame)
+		end
+	end
 end
 
 -- The module's other entry points read aura values, which is impossible here.
@@ -623,6 +715,4 @@ function PitBull4_Aura:UpdateWeaponEnchants(force)
 end
 function PitBull4_Aura:UpdateCooldownTexts(elapsed)
 	return nil
-end
-function PitBull4_Aura:OnUpdate()
 end
