@@ -151,11 +151,10 @@ end
 function PitBull4_PowerBar:GetValue(frame)
 	local unit = frame.unit
 	local layout_db = self:GetLayoutDB(frame)
-	local max = UnitPowerMax(unit)
 
 	if layout_db.hide_no_mana and UnitPowerType(unit) ~= 0 then
 		return nil
-	elseif layout_db.hide_no_power and not issecretvalue(max) and max <= 0 then
+	elseif layout_db.hide_no_power and not PitBull4.Utils.UnitHasPower(unit) then
 		return nil
 	end
 
@@ -163,6 +162,7 @@ function PitBull4_PowerBar:GetValue(frame)
 		return UnitPowerPercent(unit)
 	end
 
+	local max = UnitPowerMax(unit)
 	if max == 0 then
 		return 0
 	end

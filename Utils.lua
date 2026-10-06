@@ -353,3 +353,41 @@ function PitBull4.Utils.GetRelativeFrame(relative_to)
 		error("PitBull4 found an unknown prefix string on the relative_to setting: "..relative_to)
 	end
 end
+
+do
+	local issecretvalue = _G.issecretvalue or function() return false end
+
+	--- Whether the unit has any of the given power at all (its displayed
+	-- power when power_type is nil), as opposed to merely being empty.
+	-- Secret values: the maximum is plain for player-controlled units and
+	-- decides directly. For everyone else it is secret, and two plain reads
+	-- stand in. UnitHasPowerType returns a plain boolean, and UnitPower is
+	-- left plain by the engine for a power the unit does not have
+	-- (UnitDocumentation.lua, SecretWhenUnitPowerRestricted: "unless the
+	-- subject unit does not have a power of this type"). When neither
+	-- settles it the unit is assumed to have the power.
+	-- @param unit the unit token
+	-- @param power_type a power type, or nil for the displayed one
+	-- @usage if PitBull4.Utils.UnitHasPower("target") then ... end
+	-- @return a plain boolean
+	function PitBull4.Utils.UnitHasPower(unit, power_type)
+		local max = UnitPowerMax(unit, power_type)
+		if not issecretvalue(max) then
+			return max > 0
+		end
+		if power_type == nil then
+			power_type = UnitPowerType(unit)
+		end
+		if UnitHasPowerType and power_type ~= nil then
+			local has = UnitHasPowerType(unit, power_type)
+			if not issecretvalue(has) and not has then
+				return false
+			end
+		end
+		local cur = UnitPower(unit, power_type)
+		if not issecretvalue(cur) then
+			return cur > 0
+		end
+		return true
+	end
+end

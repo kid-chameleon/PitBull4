@@ -164,15 +164,9 @@ end, L["health as current/maximum, or the status; styles: percent, missing, smar
 -- Power
 -----------------------------------------------------------------------------
 
--- Whether the unit has the power at all is only decidable when the maximum
--- is readable (the player's group); everyone else is assumed to have it.
-local function has_power(unit, power_type)
-	local max = UnitPowerMax(unit, power_type)
-	if issecretvalue(max) then
-		return true
-	end
-	return max > 0
-end
+-- Whether the unit has the power at all: plain maximum where readable,
+-- UnitHasPowerType and a plain UnitPower elsewhere (see Utils.UnitHasPower).
+local has_power = PitBull4.Utils.UnitHasPower
 
 PitBull4_TagTexts:RegisterTag("curpp", UNIT_EVENTS_POWER, function(unit)
 	return format("%d", UnitPower(unit))
