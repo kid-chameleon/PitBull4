@@ -194,10 +194,16 @@ PitBull4_TagTexts:RegisterTag("pp", UNIT_EVENTS_POWER, function(unit, frame, sty
 		return WrapString(TruncateWhenZero(UnitPowerMissing(unit)), "-", "")
 	elseif style == "smart" then
 		return WrapString(TruncateWhenZero(UnitPowerMissing(unit)), "|cff7f7fff", "|r")
-	elseif style == "both" then
-		return format("%d/%d || %d%%", UnitPower(unit), UnitPowerMax(unit), power_percent(unit))
 	end
-	return format("%d/%d", UnitPower(unit), UnitPowerMax(unit))
+	-- Most units' maximum is secret and UnitHasPowerType is true for a
+	-- creature whose power type has a maximum of zero, so the engine decides:
+	-- TruncateWhenZero turns a zero maximum into "", and WrapString then
+	-- drops the text instead of joining "current/" and maximum.
+	local max = TruncateWhenZero(UnitPowerMax(unit))
+	if style == "both" then
+		return WrapString(max, format("%d/", UnitPower(unit)), format(" || %d%%", power_percent(unit)))
+	end
+	return WrapString(max, format("%d/", UnitPower(unit)), "")
 end, L["power as current/maximum, nothing for units without power; styles: percent, missing, smart, both"])
 
 PitBull4_TagTexts:RegisterTag("druidmana", UNIT_EVENTS_POWER, function(unit)

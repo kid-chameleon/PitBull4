@@ -38,16 +38,30 @@
 --            cost of every difference in styling between own and others'
 --            auras.
 --
--- Group membership is decided by the engine twice over: a full scan reads
--- each group's filter string through C_UnitAuras.GetUnitAuraInstanceIDs, and
--- an incremental UNIT_AURA update tests each added or changed aura against
--- the same string through C_UnitAuras.IsAuraFilteredOutByInstanceID. In the
--- field the two have disagreed on the PLAYER component: a party member's
--- own Find Herbs landed in the "mine" group with its styling, and an aura
--- that both calls admitted showed twice. The module therefore asks the
--- container for a full rebuild on every UNIT_AURA of its unit; the rebuild
--- runs in the same frame as the engine's own incremental pass and replaces
--- its result, so only the scan ever decides what is shown.
+-- The split itself only holds on the player's own frame. On any other unit
+-- the engine's PLAYER component does not mean "cast by me": on a party
+-- member the HELPFUL|PLAYER scan returned the member's own self-buffs (Find
+-- Herbs, an aspect) and the HELPFUL|!PLAYER scan returned them as well, so
+-- each showed twice, once in each group's styling, on the party frame and on
+-- the target frame alike (2026-10-07). A group's membership is whatever
+-- C_UnitAuras.GetUnitAuraInstanceIDs returns for its own filter string; the
+-- two groups cannot be made to agree from here, and no candidate filter means
+-- "cast by me" (isFromPlayerOrPlayerPet means cast by any player). So by
+-- default (secret_split = "player") only a frame for the player unit has the
+-- two groups, and every other frame gets the single merged group whatever
+-- the maximum mode says; the engine's default order still puts the player's
+-- auras first in it, by sourceUnit rather than by filter. secret_split =
+-- "all" restores the split everywhere for anyone who wants to see what the
+-- engine makes of it.
+--
+-- Group membership is also decided by the engine twice over: a full scan
+-- reads each group's filter string through GetUnitAuraInstanceIDs, and an
+-- incremental UNIT_AURA update tests each added or changed aura against the
+-- same string through C_UnitAuras.IsAuraFilteredOutByInstanceID. The two
+-- need not agree, so the module asks the container for a full rebuild on
+-- every UNIT_AURA of its unit; the rebuild is applied in the container's
+-- next OnUpdate together with the incremental result and replaces it, so
+-- only the scan ever decides what is shown.
 --
 -- Rules for engine-placed buttons, from the Bufflehead port (its
 -- doc/forever-support.md §11.3):
@@ -97,6 +111,15 @@ local MAX_MODES = { soft = true, reserve = true, merge = true }
 local function max_mode(db)
 	local mode = db.secret_max_mode
 	return MAX_MODES[mode] and mode or "soft"
+end
+-- The mode a frame's containers are built for: the split modes are only
+-- trusted on the player unit (see the top), elsewhere they collapse to merge.
+local function frame_mode(db, frame)
+	local mode = max_mode(db)
+	if mode ~= "merge" and db.secret_split ~= "all" and frame.unit ~= "player" then
+		return "merge"
+	end
+	return mode
 end
 local function group_cap(db, kind, who, mode)
 	local max = kind == "buff" and db.max_buffs or db.max_debuffs
@@ -322,9 +345,9 @@ local function group_options(frame, kind, who, side, db, mode)
 	}
 end
 
--- A container's groups are fixed once added, so it is built for one maximum
--- mode and replaced when the layout changes it; the old one keeps its buttons
--- but is hidden and forgotten.
+-- A container's groups are fixed once added, so it is built for one mode and
+-- replaced when the layout, or the unit behind the frame, changes it; the old
+-- one keeps its buttons but is hidden and forgotten.
 local function create_container(frame, kind, mode)
 	local db = PitBull4_Aura:GetLayoutDB(frame)
 	local container = CreateFrame("AuraContainer", nil, frame, "CustomAuraContainerTemplate")
@@ -620,7 +643,7 @@ function PitBull4_Aura:UpdateFrame(frame)
 		return self:ClearFrame(frame)
 	end
 
-	local mode = max_mode(self:GetLayoutDB(frame))
+	local mode = frame_mode(self:GetLayoutDB(frame), frame)
 	local frame_containers = frame.aura_containers
 	each_kind(frame, function(kind, wanted)
 		local container = frame_containers and frame_containers[kind]
@@ -681,7 +704,7 @@ end
 
 -- The module's own handler reads aura data, which is impossible here. Each
 -- container watches UNIT_AURA for its unit and applies the update on its own;
--- this asks it for a full rebuild instead, for the reason given at the top.
+-- this asks it for a full rebuild as well, so the scan decides (see the top).
 function PitBull4_Aura:UNIT_AURA(event, unit)
 	if not PitBull4.Utils.GetBestUnitID(unit) then
 		return

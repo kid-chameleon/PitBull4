@@ -262,8 +262,16 @@ function UnitFrame__scripts:OnEnter()
 		if tooltip == "always" or (tooltip == "ooc" and not InCombatLockdown()) then
 			GameTooltip_SetDefaultAnchor(GameTooltip, self)
 			GameTooltip:SetUnit(self.unit)
-			local r, g, b = GameTooltip_UnitColor(self.unit)
-			GameTooltipTextLeft1:SetTextColor(r, g, b)
+			-- With secret values, UnitIsPVP on an out-of-group unit (e.g. a
+			-- friendly player's targettarget in an instance) returns a secret
+			-- boolean and GameTooltip_UnitColor errors on it when called from
+			-- addon code (identity restriction).  SetUnit
+			-- already colours the name line via TooltipDataRules.UnitName on
+			-- these clients, so the manual recolour is redundant there.
+			if not PitBull4.has_secrets then
+				local r, g, b = GameTooltip_UnitColor(self.unit)
+				GameTooltipTextLeft1:SetTextColor(r, g, b)
+			end
 		end
 	end
 

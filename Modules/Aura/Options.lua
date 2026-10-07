@@ -50,6 +50,9 @@ PitBull4_Aura:SetDefaults({
 	-- engine draws them (Modules/Aura/Container.lua); ignored elsewhere
 	secret_max_mode = "reserve",
 	secret_max_reserve = 2,
+	-- which frames split own auras from others' at all when the engine
+	-- draws them: its "cast by me" only holds on the player's own frame
+	secret_split = "player",
 	zoom_aura = false,
 	click_through = false,
 	suppress_occ = false,
@@ -2700,6 +2703,26 @@ PitBull4_Aura:SetLayoutOptionsFunction(function(self)
 						max = 80,
 						step = 1,
 						order = 3,
+					},
+					-- The engine's idea of "cast by me" has only matched the
+					-- module's on the player's own frame; on a party member
+					-- it filed the member's self-buffs under both groups.
+					secret_split = {
+						type = 'select',
+						name = L["Split mine from others' on"],
+						desc = L["Which frames keep your own auras and everyone else's in separate groups. The game engine decides which auras count as yours, and on any frame but your own it has filed other people's auras as yours and shown them twice, so by default only your own frame splits them and every other frame shows one merged list, yours first. Choose 'Every frame' to split everywhere regardless."],
+						values = {
+							player = L["My own frame only"],
+							all = L["Every frame"],
+						},
+						get = get,
+						set = set,
+						disabled = is_aura_disabled,
+						hidden = function()
+							return not PitBull4.has_secrets or PitBull4.Options.GetLayoutDB(self).secret_max_mode == "merge"
+						end,
+						width = 'full',
+						order = 4,
 					},
 				},
 			},

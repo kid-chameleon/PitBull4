@@ -1263,3 +1263,7 @@ L["Reserve slots for mine"] = true
 L["Merge mine and others'"] = true
 L["Slots reserved for mine"] = true
 L["How many of the maximum are kept for your own auras; everyone else's get the rest."] = true
+L["Split mine from others' on"] = true
+L["Which frames keep your own auras and everyone else's in separate groups. The game engine decides which auras count as yours, and on any frame but your own it has filed other people's auras as yours and shown them twice, so by default only your own frame splits them and every other frame shows one merged list, yours first. Choose 'Every frame' to split everywhere regardless."] = true
+L["My own frame only"] = true
+L["Every frame"] = true
