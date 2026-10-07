@@ -228,6 +228,7 @@ local function build_button(button, frame, kind, who, side)
 	local colors = PitBull4_Aura.db.profile.global.colors
 	-- a merged group can only be styled one way; it takes the others' settings
 	local cancel = who ~= "other"
+	local merged = who == "all"
 	who = style_who(who)
 	local category = CATEGORY[kind][who]
 	local size = icon_size(db, kind, who)
@@ -269,8 +270,15 @@ local function build_button(button, frame, kind, who, side)
 			elseif color_type == "custom" and friend_db.custom_color then
 				border:SetVertexColor(unpack(friend_db.custom_color))
 			else
+				-- a merged group holds everyone's auras, so neither caster
+				-- colour is right for it: it gets the unknown-caster colour
 				local caster = colors and colors.caster
-				local color = caster and (caster[who == "mine" and "my" or "other"] or caster[who])
+				local color
+				if merged then
+					color = caster and caster.unknown
+				else
+					color = caster and (caster[who == "mine" and "my" or "other"] or caster[who])
+				end
 				if color then
 					border:SetVertexColor(color[1], color[2], color[3], color[4] or 1)
 				end

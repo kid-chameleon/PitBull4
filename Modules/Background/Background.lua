@@ -3,6 +3,18 @@ local PitBull4 = _G.PitBull4
 local UnitGUID = PitBull4.UnitGUID
 local L = PitBull4.L
 
+-- Secret values (WoW: Forever): PlayerModel:SetUnit refuses a unit whose
+-- identity is restricted (every unit outside the group inside an instance),
+-- so the model stays cleared for those and only the flat colour shows.
+local has_secrets = PitBull4.has_secrets
+local ShouldUnitIdentityBeSecret = C_Secrets and C_Secrets.ShouldUnitIdentityBeSecret
+local function identity_secret(unit)
+	if not has_secrets or not unit or not ShouldUnitIdentityBeSecret then
+		return false
+	end
+	return ShouldUnitIdentityBeSecret(unit)
+end
+
 local PitBull4_Background = PitBull4:NewModule("Background")
 
 PitBull4_Background:SetModuleType("custom")
@@ -78,7 +90,9 @@ function PitBull4_Background:UpdateFrame(frame)
 
 	portrait.guid = frame.guid
 	portrait:ClearModel()
-	if not falling_back then
+	if identity_secret(unit) then
+		-- leave the model empty, see above
+	elseif not falling_back then
 		portrait:SetUnit(frame.unit)
 		portrait:SetPortraitZoom(1)
 		portrait:SetPosition(0, 0, 0)

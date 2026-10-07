@@ -256,7 +256,9 @@ if has_secrets then
 	-- @return the opacity to use, which may be a secret
 	function PitBull4_RangeFader:GetSecretAlpha(frame, alpha)
 		local unit = frame.unit
-		if not unit or UnitIsUnit(unit, "player") then
+		-- UnitIsUnit is secret for compound tokens on restricted maps, so
+		-- compare the token itself.
+		if not unit or unit == "player" then
 			return nil
 		end
 

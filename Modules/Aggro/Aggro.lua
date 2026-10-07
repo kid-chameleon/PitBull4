@@ -3,6 +3,19 @@ local PitBull4 = _G.PitBull4
 local UnitGUID = PitBull4.UnitGUID
 local L = PitBull4.L
 
+local issecretvalue = _G.issecretvalue or function() return false end
+
+-- UnitThreatSituation is secret for compound tokens (targettarget,
+-- focustarget, ...) on clients with secret values; treat that as no aggro
+-- rather than comparing it.
+local function has_aggro(unit)
+	local status = UnitThreatSituation(unit)
+	if not status or issecretvalue(status) then
+		return false
+	end
+	return status > 2
+end
+
 local PitBull4_Aggro = PitBull4:NewModule("Aggro", "AceHook-3.0")
 
 PitBull4_Aggro:SetModuleType("custom")
@@ -59,8 +72,7 @@ function PitBull4_Aggro:HealthBar_GetColor(module, frame, value)
 	local unit = frame.unit
 	local db = self:GetLayoutDB(frame)
 	if unit and db.enabled and db.kind == "HealthBar" and UnitIsFriend("player", unit) then
-		local status = UnitThreatSituation(unit) or 0
-		if status > 2 then
+		if has_aggro(unit) then
 			local aggro_color = self.db.profile.global.aggro_color
 			return aggro_color[1], aggro_color[2], aggro_color[3], nil, true
 		end
@@ -82,8 +94,7 @@ function PitBull4_Aggro:Border_GetTextureAndColor(module, frame)
 	end
 
 	if unit and db.enabled and db.kind == "Border" and UnitIsFriend("player", unit) then
-		local status = UnitThreatSituation(unit) or 0
-		if status > 2 then
+		if has_aggro(unit) then
 			r, g, b, a = unpack(self.db.profile.global.aggro_color)
 			if not texture or texture == "None" then
 				texture = "Blizzard Tooltip"
@@ -107,8 +118,7 @@ function PitBull4_Aggro:Background_GetColor(module, frame)
 	end
 
 	if unit and db.enabled and db.kind == "Background" and UnitIsFriend("player", unit) then
-		local status = UnitThreatSituation(unit) or 0
-		if status > 2 then
+		if has_aggro(unit) then
 			local a2
 			r, g, b, a2 = unpack(self.db.profile.global.aggro_color)
 			if a then

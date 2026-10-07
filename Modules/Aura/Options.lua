@@ -23,6 +23,8 @@ local color_defaults = {
 	caster = {
 		my = {0, 1, 0, 1},
 		other = {1, 0, 0, 1},
+		-- secret values: merged groups cannot tell who cast an aura
+		unknown = {0.5, 0.5, 0.5, 1},
 	},
 	type = {
 		Poison = {0, 1, 0, 1},
@@ -1841,6 +1843,15 @@ PitBull4_Aura:SetColorOptionsFunction(function(self)
 				get = get,
 				set = set,
 				order = 1,
+			},
+			unknown = {
+				type = 'color',
+				name = L["Unknown caster"],
+				desc = L["Color for buffs whose caster cannot be known. Used where your own and others' auras share one list (secret values)."],
+				get = get,
+				set = set,
+				order = 2,
+				hidden = function() return not PitBull4.has_secrets end,
 			},
 		},
 	},
