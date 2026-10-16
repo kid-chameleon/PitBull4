@@ -1,6 +1,16 @@
 <Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/
 ..\FrameXML\UI.xsd">
 
+<!--
+  Retail (game type "standard", 12.x) enforces the same secret values as WoW:
+  Forever: health, power, auras, cast info and the identity of non-group units
+  are unreadable from addon code under combat, encounter, challenge mode and
+  PvP match restrictions. This manifest is modules_Camelot.xml plus the
+  retail-only modules, each audited for secret reads (doc/forever-support.md
+  §18). Player-owned resources (class power, runes, totems, combo points) stay
+  plain for the player unit, so those modules load with small guards.
+-->
+
 <Include file="Modules\Aggro\load.xml"/>
 <Include file="Modules\AltManaBar\load.xml"/>
 <Include file="Modules\AltPowerBar\load.xml"/>
@@ -11,16 +21,15 @@
 <Include file="Modules\BattlePet\load.xml"/>
 <Include file="Modules\BlankSpace\load.xml"/>
 <Include file="Modules\Border\load.xml"/>
-<Include file="Modules\CastBar\load.xml"/>
-<Include file="Modules\CastBarLatency\load.xml"/>
+<!-- Lua cast timing is secret; the Classic cast bar carries the secret (duration object) path: <Include file="Modules\CastBar\load.xml"/> -->
+<Include file="Modules\CastBar_Classic\load.xml"/>
+<!-- not recoverable: <Include file="Modules\CastBarLatency\load.xml"/> -->
 <Include file="Modules\Chi\load.xml"/>
 <Include file="Modules\CombatFader\load.xml"/>
 <Include file="Modules\CombatIcon\load.xml"/>
 <Include file="Modules\CombatText\load.xml"/>
 <Include file="Modules\ComboPoints\load.xml"/>
-<!--@do-not-package@-->
-<Include file="Modules\DogTagTexts\load.xml"/>
-<!--@end-do-not-package@-->
+<!-- not recoverable: <Include file="Modules\DogTagTexts\load.xml"/> -->
 <Include file="Modules\Essence\load.xml"/>
 <Include file="Modules\ExperienceBar\load.xml"/>
 <Include file="Modules\HealthBar\load.xml"/>
@@ -29,7 +38,8 @@
 <Include file="Modules\HolyPower\load.xml"/>
 <Include file="Modules\HostilityFader\load.xml"/>
 <Include file="Modules\LeaderIcon\load.xml"/>
-<Include file="Modules\LuaTexts\load.xml"/>
+<!-- not recoverable: <Include file="Modules\LuaTexts\load.xml"/> -->
+<Include file="Modules\TagTexts\load.xml"/>
 <Include file="Modules\PhaseFader\load.xml"/>
 <Include file="Modules\PhaseIcon\load.xml"/>
 <Include file="Modules\Portrait\load.xml"/>

@@ -57,6 +57,10 @@ local COLOR_DEFAULTS = {
 
 local GetTotemTimeLeft = _G.GetTotemTimeLeft
 local GetTotemInfo = _G.GetTotemInfo
+-- GetTotemInfo/GetTotemTimeLeft return secrets under combat restrictions
+-- (retail 12.x, SecretWhenTotemSlotSecret): nothing can be derived from them
+-- in Lua, and the button only accepts plain textures and cooldown times.
+local issecretvalue = _G.issecretvalue or function() return false end
 
 -----------------------------------------------------------------------------
 
@@ -263,13 +267,17 @@ function PitBull4_Totems:ActivateTotem(slot)
 	for frame in PitBull4:IterateFramesForUnitID("player") do
 		if frame.Totems and frame.Totems.elements[index] then
 			local _, _, startTime, duration, icon = MyGetTotemInfo(slot, frame)
+			local secret = issecretvalue(startTime) or issecretvalue(duration)
 
 			local element = frame.Totems.elements[index]
 			local tframe = element.frame
 			local tspiral = element.spiral
 
-			tframe:SetNormalTexture(icon)
-			tframe.totem_icon = icon
+			-- a secret slot still shows as occupied, with whatever icon it had
+			if not issecretvalue(icon) then
+				tframe:SetNormalTexture(icon)
+				tframe.totem_icon = icon
+			end
 			tframe:SetAlpha(1)
 			tframe:Show()
 			tframe.force_show = frame.force_show -- set configmode as a property of the frame, so the buttonscripts know about it
@@ -277,12 +285,18 @@ function PitBull4_Totems:ActivateTotem(slot)
 
 			tframe.border:Show()
 
-			if layout_option_get(frame, 'timer_text') then
+			if layout_option_get(frame, 'timer_text') and not secret then
 				element.text:SetFormattedText(format_time(duration))
+			else
+				element.text:SetText("")
 			end
 
-			tspiral:SetCooldown(startTime, duration)
-			tspiral:SetShown(layout_option_get(frame, 'timer_spiral'))
+			if secret then
+				tspiral:Hide()
+			else
+				tspiral:SetCooldown(startTime, duration)
+				tspiral:SetShown(layout_option_get(frame, 'timer_spiral'))
+			end
 		end
 	end
 end
@@ -368,6 +382,12 @@ end
 function PitBull4_Totems.button_scripts:OnUpdate(elapsed)
 	-- Update timer
 	local timeleft = MyGetTotemTimeLeft(self.slot, self.owner)
+	if issecretvalue(timeleft) then
+		-- no text and no expiry pulse while the slot is secret; the
+		-- PLAYER_TOTEM_UPDATE event still deactivates it when it ends
+		self.text:SetText("")
+		return
+	end
 	if timeleft > 0 then
 		if layout_option_get(self.owner, 'timer_text') then
 			self.text:SetFormattedText(format_time(timeleft))

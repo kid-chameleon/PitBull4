@@ -77,17 +77,89 @@ local function is_player(unit)
 	return UnitIsPlayer(unit) or UnitInPartyIsAI(unit)
 end
 
+-- Number formats. Blizzard's AbbreviateNumbers and BreakUpLargeNumbers
+-- (1075 -> "1,075") are C-side on WoW: Forever and retail and take secrets
+-- (LocalizationDocumentation.lua, SecretArguments = "AllowedWhenTainted").
+local AbbreviateNumbers = _G.AbbreviateNumbers
+local BreakUpLargeNumbers = _G.BreakUpLargeNumbers
+
+-- The upstream LuaTexts Short() rules, so texts read as they always did:
+-- four digits raw, 23000 -> "23.0k", 250000 -> "250k", 1234567 -> "1.23m",
+-- 12345678 -> "12.3m", 1.5e9 -> "1.5b". Breakpoints go largest first and
+-- the two divisors multiply to the order (NumberAbbreviationBreakpoint in
+-- LocalizationSharedDocumentation.lua).
+local SHORT_BREAKPOINTS = {
+	{ breakpoint = 1e9, abbreviation = "b", significandDivisor = 1e8, fractionDivisor = 10, abbreviationIsGlobal = false },
+	{ breakpoint = 1e7, abbreviation = "m", significandDivisor = 1e5, fractionDivisor = 10, abbreviationIsGlobal = false },
+	{ breakpoint = 1e6, abbreviation = "m", significandDivisor = 1e4, fractionDivisor = 100, abbreviationIsGlobal = false },
+	{ breakpoint = 1e5, abbreviation = "k", significandDivisor = 1e3, fractionDivisor = 1, abbreviationIsGlobal = false },
+	{ breakpoint = 1e4, abbreviation = "k", significandDivisor = 100, fractionDivisor = 10, abbreviationIsGlobal = false },
+}
+-- A cached config saves re-parsing the table on every text update.
+local SHORT_OPTIONS = { breakpointData = SHORT_BREAKPOINTS }
+if CreateAbbreviateConfig then
+	local ok, config = pcall(CreateAbbreviateConfig, SHORT_BREAKPOINTS)
+	if ok then
+		SHORT_OPTIONS = { config = config }
+	end
+end
+local function ShortNumber(value)
+	return AbbreviateNumbers(value, SHORT_OPTIONS)
+end
+
+local NUMBER_FORMATS = {
+	short = ShortNumber,
+	comma = BreakUpLargeNumbers,
+	raw = function(value) return format("%d", value) end,
+}
+local DEFAULT_FORMAT = "short"
+
+-- A number as text in a NUMBER_FORMATS format, short by default.
+local function number_text(value, fmt)
+	return (NUMBER_FORMATS[fmt] or NUMBER_FORMATS[DEFAULT_FORMAT])(value)
+end
+
+local function pair_text(cur, max, fmt)
+	return number_text(cur, fmt), number_text(max, fmt)
+end
+
+-- A missing amount, nothing at zero. The formats print a zero and nothing
+-- secret-safe hides a formatted string, so a secret amount stays raw and
+-- goes through the engine's zero check; a plain one is checked in Lua.
+local function missing_text(missing, fmt)
+	if fmt == "raw" or issecretvalue(missing) then
+		return TruncateWhenZero(missing)
+	end
+	if missing == 0 then
+		return ""
+	end
+	return number_text(missing, fmt)
+end
+
+-- Tag arguments: a style and an optional number format, in either order.
+local function style_args(a1, a2)
+	if NUMBER_FORMATS[a1] then
+		return a2, a1
+	elseif NUMBER_FORMATS[a2] then
+		return a1, a2
+	end
+	return a1, DEFAULT_FORMAT
+end
+
 local GetQuestDifficultyColor = _G.GetQuestDifficultyColor or function() return { r = 1, g = 1, b = 1 } end
 
 local function hex(r, g, b)
 	return format("|cff%02x%02x%02x", r * 255, g * 255, b * 255)
 end
 
--- On this client a character may have a surname, and UnitName returns it as
--- its second value rather than a realm. Blizzard joins the two with a
--- client-side constant (Blizzard_FrameXMLUtil/Camelot/NameUtil.lua).
+-- On WoW: Forever a character may have a surname, and UnitName returns it as
+-- its second value; Blizzard joins the two with a client-side constant
+-- (Blizzard_FrameXMLUtil/Camelot/NameUtil.lua). Retail has no surnames and
+-- UnitName's second value is the realm there, so the constant's presence
+-- decides whether the second value is a surname at all.
 local SURNAME_SEPARATOR = Constants and Constants.CharacterNameSeparatorConsts
-	and Constants.CharacterNameSeparatorConsts.CHARACTERNAME_SURNAME_SEPARATOR or " "
+	and Constants.CharacterNameSeparatorConsts.CHARACTERNAME_SURNAME_SEPARATOR
+local HAS_SURNAMES = SURNAME_SEPARATOR ~= nil
 
 local UNIT_EVENTS_HEALTH = { UNIT_HEALTH = "unit", UNIT_MAXHEALTH = "unit", UNIT_CONNECTION = "unit", UNIT_FLAGS = "unit" }
 local UNIT_EVENTS_POWER = { UNIT_POWER_FREQUENT = "unit", UNIT_MAXPOWER = "unit", UNIT_DISPLAYPOWER = "unit" }
@@ -116,49 +188,51 @@ PitBull4_TagTexts:RegisterTag("status", UNIT_EVENTS_HEALTH, status, L["Offline, 
 -- Health
 -----------------------------------------------------------------------------
 
-PitBull4_TagTexts:RegisterTag("curhp", UNIT_EVENTS_HEALTH, function(unit)
-	return format("%d", UnitHealth(unit))
-end, L["current health"])
+PitBull4_TagTexts:RegisterTag("curhp", UNIT_EVENTS_HEALTH, function(unit, frame, style)
+	return number_text(UnitHealth(unit), style)
+end, L["current health, abbreviated; [curhp(comma)] separates thousands, [curhp(raw)] shows the bare number"])
 
-PitBull4_TagTexts:RegisterTag("maxhp", UNIT_EVENTS_HEALTH, function(unit)
-	return format("%d", UnitHealthMax(unit))
-end, L["maximum health"])
+PitBull4_TagTexts:RegisterTag("maxhp", UNIT_EVENTS_HEALTH, function(unit, frame, style)
+	return number_text(UnitHealthMax(unit), style)
+end, L["maximum health, abbreviated; [maxhp(comma)] separates thousands, [maxhp(raw)] shows the bare number"])
 
 PitBull4_TagTexts:RegisterTag("perhp", UNIT_EVENTS_HEALTH, function(unit)
 	return format("%d", health_percent(unit))
 end, L["health percentage, without the % sign"])
 
-PitBull4_TagTexts:RegisterTag("missinghp", UNIT_EVENTS_HEALTH, function(unit)
-	return TruncateWhenZero(UnitHealthMissing(unit))
-end, L["missing health, nothing when full"])
+PitBull4_TagTexts:RegisterTag("missinghp", UNIT_EVENTS_HEALTH, function(unit, frame, style)
+	return missing_text(UnitHealthMissing(unit), style)
+end, L["missing health, nothing when full; [missinghp(comma)] separates thousands, [missinghp(raw)] shows the bare number"])
 
 -- [hp], [hp(percent)], [hp(missing)], [hp(smart)], [hp(both)], [hp(info)]:
--- the status when the unit is dead or offline, otherwise the chosen style
-PitBull4_TagTexts:RegisterTag("hp", UNIT_EVENTS_HEALTH, function(unit, frame, style)
+-- the status when the unit is dead or offline, otherwise the chosen style.
+-- A second argument picks a number format: short by default, [hp(comma)]
+-- separates thousands, [hp(both,raw)] shows the bare number.
+PitBull4_TagTexts:RegisterTag("hp", UNIT_EVENTS_HEALTH, function(unit, frame, a1, a2)
 	local s = status(unit)
 	if s then
 		return s
 	end
+	local style, fmt = style_args(a1, a2)
 	if style == "percent" then
 		return format("%d%%", health_percent(unit))
 	elseif style == "missing" then
-		return WrapString(TruncateWhenZero(UnitHealthMissing(unit)), "-", "")
-	elseif style == "smart" then
-		if UnitIsFriend("player", unit) then
-			return WrapString(TruncateWhenZero(UnitHealthMissing(unit)), "|cffff7f7f", "|r")
-		end
-		return format("%d/%d", UnitHealth(unit), UnitHealthMax(unit))
-	elseif style == "both" then
-		return format("%d/%d || %d%%", UnitHealth(unit), UnitHealthMax(unit), health_percent(unit))
+		return WrapString(missing_text(UnitHealthMissing(unit), fmt), "-", "")
+	elseif style == "smart" and UnitIsFriend("player", unit) then
+		return WrapString(missing_text(UnitHealthMissing(unit), fmt), "|cffff7f7f", "|r")
+	end
+	local cur, max = pair_text(UnitHealth(unit), UnitHealthMax(unit), fmt)
+	if style == "both" then
+		return format("%s/%s || %d%%", cur, max, health_percent(unit))
 	elseif style == "info" then
 		local missing = ""
 		if UnitIsFriend("player", unit) then
-			missing = WrapString(TruncateWhenZero(UnitHealthMissing(unit)), "|cffff7f7f", "|r || ")
+			missing = WrapString(missing_text(UnitHealthMissing(unit), fmt), "|cffff7f7f", "|r || ")
 		end
-		return format("%s%d/%d || %d%%", missing, UnitHealth(unit), UnitHealthMax(unit), health_percent(unit))
+		return format("%s%s/%s || %d%%", missing, cur, max, health_percent(unit))
 	end
-	return format("%d/%d", UnitHealth(unit), UnitHealthMax(unit))
-end, L["health as current/maximum, or the status; styles: percent, missing, smart, both, info"])
+	return format("%s/%s", cur, max)
+end, L["health as current/maximum, or the status; styles: percent, missing, smart, both, info; add comma or raw for the numbers, [hp(both,comma)]"])
 
 -----------------------------------------------------------------------------
 -- Power
@@ -168,43 +242,58 @@ end, L["health as current/maximum, or the status; styles: percent, missing, smar
 -- UnitHasPowerType and a plain UnitPower elsewhere (see Utils.UnitHasPower).
 local has_power = PitBull4.Utils.UnitHasPower
 
-PitBull4_TagTexts:RegisterTag("curpp", UNIT_EVENTS_POWER, function(unit)
-	return format("%d", UnitPower(unit))
-end, L["current power"])
+PitBull4_TagTexts:RegisterTag("curpp", UNIT_EVENTS_POWER, function(unit, frame, style)
+	return number_text(UnitPower(unit), style)
+end, L["current power, abbreviated; [curpp(comma)] separates thousands, [curpp(raw)] shows the bare number"])
 
-PitBull4_TagTexts:RegisterTag("maxpp", UNIT_EVENTS_POWER, function(unit)
-	return format("%d", UnitPowerMax(unit))
-end, L["maximum power"])
+PitBull4_TagTexts:RegisterTag("maxpp", UNIT_EVENTS_POWER, function(unit, frame, style)
+	return number_text(UnitPowerMax(unit), style)
+end, L["maximum power, abbreviated; [maxpp(comma)] separates thousands, [maxpp(raw)] shows the bare number"])
 
 PitBull4_TagTexts:RegisterTag("perpp", UNIT_EVENTS_POWER, function(unit)
 	return format("%d", power_percent(unit))
 end, L["power percentage, without the % sign"])
 
-PitBull4_TagTexts:RegisterTag("missingpp", UNIT_EVENTS_POWER, function(unit)
-	return TruncateWhenZero(UnitPowerMissing(unit))
-end, L["missing power, nothing when full"])
+PitBull4_TagTexts:RegisterTag("missingpp", UNIT_EVENTS_POWER, function(unit, frame, style)
+	return missing_text(UnitPowerMissing(unit), style)
+end, L["missing power, nothing when full; [missingpp(comma)] separates thousands, [missingpp(raw)] shows the bare number"])
 
-PitBull4_TagTexts:RegisterTag("pp", UNIT_EVENTS_POWER, function(unit, frame, style)
+--- A second argument picks a number format: short by default, [pp(comma)]
+-- separates thousands, [pp(both,raw)] shows the bare number.
+PitBull4_TagTexts:RegisterTag("pp", UNIT_EVENTS_POWER, function(unit, frame, a1, a2)
 	if not has_power(unit) then
 		return nil
 	end
+	local style, fmt = style_args(a1, a2)
 	if style == "percent" then
 		return format("%d%%", power_percent(unit))
 	elseif style == "missing" then
-		return WrapString(TruncateWhenZero(UnitPowerMissing(unit)), "-", "")
+		return WrapString(missing_text(UnitPowerMissing(unit), fmt), "-", "")
 	elseif style == "smart" then
-		return WrapString(TruncateWhenZero(UnitPowerMissing(unit)), "|cff7f7fff", "|r")
+		return WrapString(missing_text(UnitPowerMissing(unit), fmt), "|cff7f7fff", "|r")
 	end
 	-- Most units' maximum is secret and UnitHasPowerType is true for a
 	-- creature whose power type has a maximum of zero, so the engine decides:
 	-- TruncateWhenZero turns a zero maximum into "", and WrapString then
-	-- drops the text instead of joining "current/" and maximum.
-	local max = TruncateWhenZero(UnitPowerMax(unit))
-	if style == "both" then
-		return WrapString(max, format("%d/", UnitPower(unit)), format(" || %d%%", power_percent(unit)))
+	-- drops the text instead of joining "current/" and maximum. That keeps
+	-- the maximum raw, so a secret maximum is never formatted; a plain one
+	-- (the player's group) is checked in Lua and formatted.
+	local max = UnitPowerMax(unit)
+	local cur
+	if not issecretvalue(max) then
+		if max == 0 then
+			return nil
+		end
+		cur, max = pair_text(UnitPower(unit), max, fmt)
+	else
+		cur = number_text(UnitPower(unit), fmt)
+		max = TruncateWhenZero(max)
 	end
-	return WrapString(max, format("%d/", UnitPower(unit)), "")
-end, L["power as current/maximum, nothing for units without power; styles: percent, missing, smart, both"])
+	if style == "both" then
+		return WrapString(max, cur .. "/", format(" || %d%%", power_percent(unit)))
+	end
+	return WrapString(max, cur .. "/", "")
+end, L["power as current/maximum, nothing for units without power; styles: percent, missing, smart, both; add comma or raw for the numbers, [pp(both,comma)]"])
 
 PitBull4_TagTexts:RegisterTag("druidmana", UNIT_EVENTS_POWER, function(unit)
 	if UnitPowerType(unit) == 0 then
@@ -229,8 +318,8 @@ PitBull4_TagTexts:RegisterTag("name", { UNIT_NAME_UPDATE = "unit" }, function(un
 	-- WrapString will not take a nil, and most units have no surname.
 	-- Comparing against nil is safe even when the value is secret: a secret
 	-- compares as plainly not nil, and a unit without a surname returns a
-	-- plain nil.
-	if style == "first" or surname == nil then
+	-- plain nil. Without surnames the second value is the realm, never shown.
+	if style == "first" or not HAS_SURNAMES or surname == nil then
 		return name
 	end
 	-- the separator is added only when the surname is not empty, and a secret
@@ -239,6 +328,7 @@ PitBull4_TagTexts:RegisterTag("name", { UNIT_NAME_UPDATE = "unit" }, function(un
 end, L["unit name with surname; [name(first)] for the first name alone"])
 
 PitBull4_TagTexts:RegisterTag("surname", { UNIT_NAME_UPDATE = "unit" }, function(unit)
+	if not HAS_SURNAMES then return nil end
 	return (select(2, UnitName(unit)))
 end, L["unit surname, if it has one"])
 
