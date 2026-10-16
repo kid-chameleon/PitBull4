@@ -24,4 +24,4 @@
 libs.xml
 load.xml
 modules.xml [AllowLoadGameType standard]
-modules_Camelot.xml [AllowLoadGameType camelot]
+modules_Camelot.xml [AllowLoadGameType camelot][ExcludeLoadGameType standard, classic]
