@@ -43,6 +43,8 @@ PitBull4_ComboPoints:SetDefaults({
 
 local overflowing_power_aura_id = nil
 
+local issecretvalue = _G.issecretvalue or function() return false end
+
 function PitBull4_ComboPoints:OnEnable()
 	self:RegisterEvent("UNIT_POWER_FREQUENT")
 	if ClassicExpansionAtLeast(LE_EXPANSION_WARLORDS_OF_DRAENOR) then
@@ -273,7 +275,15 @@ function PitBull4_ComboPoints:UpdateFrame(frame)
 	local num_overflowing = 0
 	if overflowing_power_aura_id then
 		local aura = C_UnitAuras.GetAuraDataByAuraInstanceID("player", overflowing_power_aura_id)
-		num_overflowing = aura and aura.applications or 0
+		if aura then
+			num_overflowing = aura.applications
+			-- aura data is secret under combat restrictions (retail 12.x)
+			-- and cannot be compared; issecretvalue goes first because a
+			-- boolean test on a secret is itself an error
+			if issecretvalue(num_overflowing) or not num_overflowing then
+				num_overflowing = 0
+			end
+		end
 	end
 
 	for i = 1, num_combos do

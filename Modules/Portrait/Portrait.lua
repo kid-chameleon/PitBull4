@@ -1,5 +1,6 @@
 
 local PitBull4 = _G.PitBull4
+local UnitGUID = PitBull4.UnitGUID
 local L = PitBull4.L
 
 local CLASS_TEX_COORDS = {}
@@ -12,6 +13,23 @@ for k, v in pairs(_G.CLASS_ICON_TCOORDS) do
 end
 
 local PitBull4_Portrait = PitBull4:NewModule("Portrait")
+
+-- Secret values (WoW: Forever): a 3D portrait needs the unit's identity
+-- declassified (PlayerModel:SetUnit is RequiresDeclassifiedUnitIdentity) and
+-- a class portrait needs the class as a table key, so neither can be drawn
+-- for a unit whose identity is restricted, which inside an instance is every
+-- unit outside the group. SetPortraitTexture has no such requirement, the
+-- same as Blizzard's own frames use, so both styles fall back to the 2D
+-- portrait for such a unit rather than to the placeholder.
+local has_secrets = PitBull4.has_secrets
+local issecretvalue = _G.issecretvalue or function() return false end
+local ShouldUnitIdentityBeSecret = C_Secrets and C_Secrets.ShouldUnitIdentityBeSecret
+local function identity_secret(unit)
+	if not has_secrets or not unit or not ShouldUnitIdentityBeSecret then
+		return false
+	end
+	return ShouldUnitIdentityBeSecret(unit)
+end
 
 PitBull4_Portrait:SetModuleType("indicator")
 PitBull4_Portrait:SetName(L["Portrait"])
@@ -105,6 +123,10 @@ function PitBull4_Portrait:UpdateFrame(frame)
 		return self:ClearFrame(frame)
 	end
 
+	if (style == "three_dimensional" or style == "class") and identity_secret(unit) then
+		style = "two_dimensional"
+	end
+
 	local portrait = frame.Portrait
 
 	if portrait and portrait.style ~= style then
@@ -139,7 +161,9 @@ function PitBull4_Portrait:UpdateFrame(frame)
 		bg:SetColorTexture(unpack(layout_db.color))
 	end
 
-	if portrait.guid == frame.guid and guid_demanding_update ~= frame.guid then
+	-- a pseudo guid stands in for a secret one and does not change when the
+	-- unit does, so it cannot be used to skip the update
+	if portrait.guid == frame.guid and guid_demanding_update ~= frame.guid and not PitBull4.IsPseudoGUID(frame.guid) then
 		if portrait.bg then
 			portrait.bg:Show()
 		end
@@ -152,7 +176,7 @@ function PitBull4_Portrait:UpdateFrame(frame)
 	portrait.guid = frame.guid
 	if style == "three_dimensional" then
 		portrait.model:ClearModel()
-		if not falling_back then
+		if not falling_back and not identity_secret(unit) then
 			portrait.model:SetUnit(frame.unit)
 			portrait.model:SetPortraitZoom(full_body and 0 or 1)
 			portrait.model:SetPosition(0, 0, 0)
@@ -175,7 +199,7 @@ function PitBull4_Portrait:UpdateFrame(frame)
 		portrait.texture:SetTexture("")
 	else -- class
 		local class = unit and select(2, UnitClass(unit))
-		if class then
+		if class and not issecretvalue(class) then
 			local tex_coord = CLASS_TEX_COORDS[class]
 			portrait.texture:SetTexture([[Interface\Glues\CharacterCreate\UI-CharacterCreate-Classes]])
 			portrait.texture:SetTexCoord(unpack(tex_coord))

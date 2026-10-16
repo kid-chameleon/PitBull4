@@ -1,9 +1,16 @@
 local PitBull4 = _G.PitBull4
+local UnitGUID = PitBull4.UnitGUID
 local L = PitBull4.L
 
 local EXAMPLE_VALUE = 0.8
 
 local unpack = _G.unpack
+
+-- Secret values (WoW: Forever): health is never readable. The bar takes
+-- UnitHealthPercent directly and the gradient colour comes from a colour
+-- curve the engine evaluates against the same percentage.
+local has_secrets = PitBull4.has_secrets
+local issecretvalue = _G.issecretvalue or function() return false end
 
 local PitBull4_HealthBar = PitBull4:NewModule("HealthBar")
 
@@ -59,8 +66,35 @@ timerFrame:SetScript("OnUpdate", function()
 	wipe(guids_to_update)
 end)
 
+-- colour curves for the secret path, rebuilt whenever the colours change
+local color_curve, bg_curve, curve_key
+local function get_curves(self)
+	local colors = self.db.profile.global.colors
+	local min, half, max = colors.min_health, colors.half_health, colors.max_health
+	local key = ("%s,%s,%s,%s,%s,%s,%s,%s,%s"):format(min[1], min[2], min[3], half[1], half[2], half[3], max[1], max[2], max[3])
+	if key ~= curve_key then
+		curve_key = key
+		color_curve = C_CurveUtil.CreateColorCurve()
+		color_curve:AddPoint(0, CreateColor(min[1], min[2], min[3]))
+		color_curve:AddPoint(0.5, CreateColor(half[1], half[2], half[3]))
+		color_curve:AddPoint(1, CreateColor(max[1], max[2], max[3]))
+		-- the same variation SecretStatusBar would derive from a plain colour
+		bg_curve = C_CurveUtil.CreateColorCurve()
+		bg_curve:AddPoint(0, CreateColor((min[1] + 0.2) / 3, (min[2] + 0.2) / 3, (min[3] + 0.2) / 3))
+		bg_curve:AddPoint(0.5, CreateColor((half[1] + 0.2) / 3, (half[2] + 0.2) / 3, (half[3] + 0.2) / 3))
+		bg_curve:AddPoint(1, CreateColor((max[1] + 0.2) / 3, (max[2] + 0.2) / 3, (max[3] + 0.2) / 3))
+	end
+	return color_curve, bg_curve
+end
+
 function PitBull4_HealthBar:GetValue(frame)
 	local unit = frame.unit
+	if has_secrets then
+		if UnitIsGhost(unit) then
+			return 0
+		end
+		return UnitHealthPercent(unit, true)
+	end
 	local max = UnitHealthMax(unit)
 	if max == 0 then
 		return 0
@@ -90,6 +124,11 @@ function PitBull4_HealthBar:GetColor(frame, value)
 		return color[1], color[2], color[3], nil, true
 	end
 
+	if issecretvalue(value) then
+		local curve = get_curves(self)
+		return UnitHealthPercent(unit, true, curve):GetRGB()
+	end
+
 	local high_r, high_g, high_b
 	local low_r, low_g, low_b
 	local colors = self.db.profile.global.colors
@@ -113,6 +152,24 @@ function PitBull4_HealthBar:GetColor(frame, value)
 end
 function PitBull4_HealthBar:GetExampleColor(frame, value)
 	return unpack(self.db.profile.global.colors.disconnected)
+end
+
+if has_secrets then
+	-- The control cannot derive a background colour from a secret foreground
+	-- colour, so evaluate the darkened gradient for it. Returns nothing when
+	-- the foreground colour is plain (dead, disconnected, tapped, example)
+	-- and lets the control derive it as usual.
+	function PitBull4_HealthBar:GetBackgroundColor(frame, bar_db, value)
+		if not issecretvalue(value) then
+			return nil
+		end
+		local unit = frame.unit
+		if not unit or not UnitIsConnected(unit) or UnitIsDeadOrGhost(unit) or UnitIsTapDenied(unit) then
+			return nil
+		end
+		local _, curve = get_curves(self)
+		return UnitHealthPercent(unit, true, curve):GetRGB()
+	end
 end
 
 function PitBull4_HealthBar:UNIT_HEALTH(_, unit)

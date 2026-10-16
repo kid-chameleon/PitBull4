@@ -52,6 +52,65 @@ function PitBull4:GetFinalFrameOpacity(frame)
 	return low
 end
 
+-- Secret values (WoW: Forever): a fader may have to derive its opacity from
+-- something unreadable, such as whether a unit is in range or how much health
+-- it has left. The engine can pick or compute the opacity, but the result
+-- cannot be compared, so such a frame is set directly with no smoothing and
+-- the pipeline keeps its own copy of what it set: once a secret alpha has
+-- been applied, frame:GetAlpha() returns a secret for good.
+local has_secrets = PitBull4.has_secrets
+local issecretvalue = _G.issecretvalue or function() return false end
+
+local frame_to_alpha = {}
+
+--- Set a frame's opacity, remembering it so it can be read back.
+-- @param frame the Unit Frame
+-- @param alpha the opacity, which may be a secret
+-- @usage PitBull4.ApplyFrameAlpha(frame, 0.5)
+local function apply_alpha(frame, alpha)
+	frame_to_alpha[frame] = alpha
+	frame:SetAlpha(alpha)
+	-- XXX Quick fix for model widgets not inheriting alpha https://github.com/Stanzilla/WoWUIBugs/issues/295
+	if frame.Portrait and frame.Portrait.model then
+		frame.Portrait.model:SetAlpha(alpha)
+	end
+end
+PitBull4.ApplyFrameAlpha = apply_alpha
+
+-- The frame's current opacity, or nil when it cannot be read.
+local function current_alpha(frame)
+	local alpha = frame_to_alpha[frame]
+	if alpha == nil then
+		alpha = frame:GetAlpha()
+	end
+	if issecretvalue(alpha) then
+		return nil
+	end
+	return alpha
+end
+
+--- A fader module may declare :GetSecretAlpha(frame, alpha), which is called
+-- only where secret values are enforced. It is given the opacity the ordinary
+-- faders agreed on and returns the one to use instead, which may be a secret
+-- from C_CurveUtil.EvaluateColorValueFromBoolean or from a curve the engine
+-- evaluates against a unit's health or power. Modules are called in turn and
+-- each is given the previous one's result, so several can apply, but one that
+-- cannot fold an incoming secret into its own calculation will override it.
+local function apply_secret_faders(frame, alpha)
+	for _, module in PitBull4:IterateModulesOfType("fader") do
+		if module.GetSecretAlpha then
+			local layout_db = module:GetLayoutDB(frame)
+			if layout_db and layout_db.enabled then
+				local new_alpha = module:GetSecretAlpha(frame, alpha)
+				if new_alpha ~= nil then
+					alpha = new_alpha
+				end
+			end
+		end
+	end
+	return alpha
+end
+
 local timerFrame = CreateFrame("Frame")
 timerFrame:SetScript("OnUpdate", function(self, elapsed)
 	local opacity_delta = elapsed * OPACITY_POINTS_PER_SECOND
@@ -60,9 +119,15 @@ timerFrame:SetScript("OnUpdate", function(self, elapsed)
 			changing_frames[frame] = nil
 		else
 			local final_opacity = PitBull4:GetFinalFrameOpacity(frame)
-			local current_opacity = frame:GetAlpha()
+			if has_secrets then
+				final_opacity = apply_secret_faders(frame, final_opacity)
+			end
+			local current_opacity = current_alpha(frame)
 
-			if final_opacity ~= current_opacity then
+			if current_opacity == nil or issecretvalue(final_opacity) then
+				apply_alpha(frame, final_opacity)
+				changing_frames[frame] = nil
+			elseif final_opacity ~= current_opacity then
 				local result_opacity
 				if not frame.layout_db.opacity_smooth then
 					result_opacity = final_opacity
@@ -78,11 +143,7 @@ timerFrame:SetScript("OnUpdate", function(self, elapsed)
 					end
 				end
 
-				frame:SetAlpha(result_opacity)
-				-- XXX Quick fix for model widgets not inheriting alpha https://github.com/Stanzilla/WoWUIBugs/issues/295
-				if frame.Portrait and frame.Portrait.model then
-					frame.Portrait.model:SetAlpha(result_opacity)
-				end
+				apply_alpha(frame, result_opacity)
 				if result_opacity == final_opacity then
 					changing_frames[frame] = nil
 				end
@@ -204,15 +265,24 @@ function FaderModule:UpdateFrame(frame)
 		module_to_frame_to_priority[self] = frame_to_priority
 	end
 
+	-- a module with only :GetSecretAlpha contributes no comparable opacity,
+	-- so the frame has to be rechecked whenever it is updated
+	local recheck = has_secrets and self.GetSecretAlpha and frame:IsVisible()
+
 	local opacity, priority = call_opacity_function(self, frame)
 	if not opacity then
-		return self:ClearFrame(frame)
+		local changed = self:ClearFrame(frame)
+		if recheck then
+			changing_frames[frame] = true
+			timerFrame:Show()
+		end
+		return changed
 	end
 	if not priority then
 		priority = 0
 	end
 
-	if frame_to_opacity[frame] ~= opacity or frame_to_priority[frame] ~= priority then
+	if recheck or frame_to_opacity[frame] ~= opacity or frame_to_priority[frame] ~= priority then
 		frame_to_opacity[frame] = opacity
 		frame_to_priority[frame] = priority
 		changing_frames[frame] = true

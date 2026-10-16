@@ -7,6 +7,8 @@ local L = PitBull4.L
 local DEBUG = PitBull4.DEBUG
 local expect = PitBull4.expect
 local frames_to_anchor = PitBull4.frames_to_anchor
+local UnitGUID = PitBull4.UnitGUID
+local IsPseudoGUID = PitBull4.IsPseudoGUID
 
 -- CONSTANTS ----------------------------------------------------------------
 
@@ -77,7 +79,9 @@ function PitBull4:MakeSingletonFrame(classification)
 			frame:SetAttribute("ping-receiver", true)
 		end
 
-		frame:WrapScript(frame, "OnAttributeChanged", Singleton_OnAttributeChanged)
+		if PitBull4.secure_snippets_ok then
+			frame:WrapScript(frame, "OnAttributeChanged", Singleton_OnAttributeChanged)
+		end
 		frame.is_singleton = true
 
 		frame.classification = classification
@@ -258,8 +262,16 @@ function UnitFrame__scripts:OnEnter()
 		if tooltip == "always" or (tooltip == "ooc" and not InCombatLockdown()) then
 			GameTooltip_SetDefaultAnchor(GameTooltip, self)
 			GameTooltip:SetUnit(self.unit)
-			local r, g, b = GameTooltip_UnitColor(self.unit)
-			GameTooltipTextLeft1:SetTextColor(r, g, b)
+			-- With secret values, UnitIsPVP on an out-of-group unit (e.g. a
+			-- friendly player's targettarget in an instance) returns a secret
+			-- boolean and GameTooltip_UnitColor errors on it when called from
+			-- addon code (identity restriction).  SetUnit
+			-- already colours the name line via TooltipDataRules.UnitName on
+			-- these clients, so the manual recolour is redundant there.
+			if not PitBull4.has_secrets then
+				local r, g, b = GameTooltip_UnitColor(self.unit)
+				GameTooltipTextLeft1:SetTextColor(r, g, b)
+			end
 		end
 	end
 
@@ -354,7 +366,7 @@ function UnitFrame__scripts:OnShow()
 		end
 	end
 
-	self:SetAlpha(PitBull4:GetFinalFrameOpacity(self))
+	PitBull4.ApplyFrameAlpha(self, PitBull4:GetFinalFrameOpacity(self))
 
 	if not self.force_show then
 		-- Force an update to fix the frame if the unit info wasn't ready (ticket 1251)
@@ -399,6 +411,15 @@ local function register_for_clicks_helper(frame, clicks)
 	frame:RegisterForClicks(clicks)
 end
 register_for_clicks_helper = PitBull4:OutOfCombatWrapper(register_for_clicks_helper)
+
+-- SetClampedToScreen is a protected call on secure frames while in combat
+-- and isn't available in the RestrictedFrames environment. Group headers
+-- create new member frames during combat (e.g. someone joining the party),
+-- so the clamp has to wait until combat ends for those frames.
+local function set_clamped_to_screen_helper(frame)
+	frame:SetClampedToScreen(true)
+end
+set_clamped_to_screen_helper = PitBull4:OutOfCombatWrapper(set_clamped_to_screen_helper)
 
 --- Add the proper functions and scripts to a SecureUnitButton, as well as some various initialization.
 -- @param frame a Button which inherits from SecureUnitButton
@@ -468,7 +489,11 @@ function PitBull4:ConvertIntoUnitFrame(frame, isExampleFrame)
 	end
 	frame:RefreshVehicle()
 
-	frame:SetClampedToScreen(true)
+	if frame:CanChangeProtectedState() then
+		frame:SetClampedToScreen(true)
+	else
+		set_clamped_to_screen_helper(frame)
+	end
 
 	if frame.is_singleton then
 		if not frame.classification_db.click_through then
@@ -586,6 +611,13 @@ SingletonUnitFrame.RefixSizeAndPosition = PitBull4:OutOfCombatWrapper(SingletonU
 -- This handles UnitWatch and the custom StateDriver
 -- @usage frame:Activate()
 function SingletonUnitFrame:Activate()
+	if not PitBull4.secure_snippets_ok then
+		-- Without the OnAttributeChanged snippet nothing turns the
+		-- state-unitexists attribute into Show/Hide, so let the unit watch
+		-- do it directly. Config mode cannot force frames shown this way.
+		RegisterUnitWatch(self)
+		return
+	end
 	RegisterUnitWatch(self, true)
 	RegisterAttributeDriver(self, "state-pb4visibility", "[petbattle] hide; default")
 end
@@ -811,13 +843,16 @@ function UnitFrame:UpdateGUID(guid, update)
 	end
 
 	-- if the guids are the same, cut out, but don't if it's a wacky unit that has a guid.
-	if update ~= true and self.guid == guid and not (guid and self.is_wacky and not self.best_unit) then
+	-- A pseudo guid stands in for a secret one, so the identity is unknown and
+	-- has to be assumed to have changed.
+	local is_pseudo = guid and IsPseudoGUID(guid)
+	if update ~= true and self.guid == guid and not is_pseudo and not (guid and self.is_wacky and not self.best_unit) then
 		return
 	end
 	local previousGUID = self.guid
 	self.guid = guid
 	if update ~= false then
-		self:Update(previousGUID == guid)
+		self:Update(previousGUID == guid and not is_pseudo)
 	end
 end
 

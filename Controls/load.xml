@@ -3,6 +3,7 @@
 
 <Script file="Controls.lua"/>
 <Script file="BetterStatusBar.lua"/>
+<Script file="SecretStatusBar.lua"/>
 <Script file="Icon.lua"/>
 
 </Ui>

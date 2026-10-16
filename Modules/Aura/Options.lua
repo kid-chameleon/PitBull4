@@ -23,6 +23,8 @@ local color_defaults = {
 	caster = {
 		my = {0, 1, 0, 1},
 		other = {1, 0, 0, 1},
+		-- secret values: merged groups cannot tell who cast an aura
+		unknown = {0.5, 0.5, 0.5, 1},
 	},
 	type = {
 		Poison = {0, 1, 0, 1},
@@ -46,6 +48,13 @@ PitBull4_Aura:SetDefaults({
 	--  until we have pre-defined layouts for frames.
 	max_buffs = 6,
 	max_debuffs = 6,
+	-- how the maximum is shared between own and others' auras when the
+	-- engine draws them (Modules/Aura/Container.lua); ignored elsewhere
+	secret_max_mode = "reserve",
+	secret_max_reserve = 2,
+	-- which frames split own auras from others' at all when the engine
+	-- draws them: its "cast by me" only holds on the player's own frame
+	secret_split = "player",
 	zoom_aura = false,
 	click_through = false,
 	suppress_occ = false,
@@ -1835,6 +1844,15 @@ PitBull4_Aura:SetColorOptionsFunction(function(self)
 				set = set,
 				order = 1,
 			},
+			unknown = {
+				type = 'color',
+				name = L["Unknown caster"],
+				desc = L["Color for buffs whose caster cannot be known. Used where your own and others' auras share one list (secret values)."],
+				get = get,
+				set = set,
+				order = 2,
+				hidden = function() return not PitBull4.has_secrets end,
+			},
 		},
 	},
 	'type', {
@@ -2660,6 +2678,62 @@ PitBull4_Aura:SetLayoutOptionsFunction(function(self)
 						max = 80,
 						step = 1,
 						order = 1,
+					},
+					-- Only where the game engine draws the auras: it keeps the
+					-- player's auras and everyone else's in separate groups,
+					-- caps each group on its own and never says how many a
+					-- group shows, so the maximum cannot be shared exactly
+					-- without giving up the separate styling.
+					secret_max_mode = {
+						type = 'select',
+						name = L["Share the maximum"],
+						desc = L["How your own auras and everyone else's share the maximum. Your own auras always get all of it. 'Soft' gives others' auras all of it too, so together they can show twice the maximum. 'Reserve' gives others' auras the maximum less the slots reserved for yours, so the total only goes over when you have more auras on the unit than were reserved. 'Merge' shows both in one list, yours first, and never goes over, but your own auras lose their own size, border and text settings."],
+						values = {
+							soft = L["Soft"],
+							reserve = L["Reserve slots for mine"],
+							merge = L["Merge mine and others'"],
+						},
+						get = get,
+						set = set,
+						disabled = is_aura_disabled,
+						hidden = function() return not PitBull4.has_secrets end,
+						width = 'full',
+						order = 2,
+					},
+					secret_max_reserve = {
+						type = 'range',
+						name = L["Slots reserved for mine"],
+						desc = L["How many of the maximum are kept for your own auras; everyone else's get the rest."],
+						get = get,
+						set = set,
+						disabled = is_aura_disabled,
+						hidden = function()
+							return not PitBull4.has_secrets or PitBull4.Options.GetLayoutDB(self).secret_max_mode ~= "reserve"
+						end,
+						min = 0,
+						max = 80,
+						step = 1,
+						order = 3,
+					},
+					-- The engine's idea of "cast by me" has only matched the
+					-- module's on the player's own frame; on a party member
+					-- it filed the member's self-buffs under both groups.
+					secret_split = {
+						type = 'select',
+						name = L["Split mine from others' on"],
+						desc = L["Which frames keep your own auras and everyone else's in separate groups. The game engine decides which auras count as yours, and on any frame but your own it has filed other people's auras as yours and shown them twice, so by default only your own frame splits them and every other frame shows one merged list, yours first. Choose 'Every frame' to split everywhere regardless."],
+						values = {
+							player = L["My own frame only"],
+							all = L["Every frame"],
+						},
+						get = get,
+						set = set,
+						disabled = is_aura_disabled,
+						hidden = function()
+							return not PitBull4.has_secrets or PitBull4.Options.GetLayoutDB(self).secret_max_mode == "merge"
+						end,
+						width = 'full',
+						order = 4,
 					},
 				},
 			},

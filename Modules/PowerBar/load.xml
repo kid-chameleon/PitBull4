@@ -2,5 +2,6 @@
 ..\FrameXML\UI.xsd">
 
 <Script file="PowerBar.lua"/>
+<Script file="Controls.lua"/>
 
 </Ui>

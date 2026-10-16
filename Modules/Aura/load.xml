@@ -15,5 +15,7 @@
 	<Script file="Layout.lua"/>
 	<Script file="Skin.lua"/>
 	<Script file="Options.lua"/>
+	<!-- Secret-value clients (retail 12.x): engine AuraContainer backend, self-gated on PitBull4.has_secrets -->
+	<Script file="Container.lua"/>
 
 </Ui>

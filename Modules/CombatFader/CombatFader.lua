@@ -17,6 +17,14 @@ PitBull4_CombatFader:SetDefaults({
 
 local state = 'out_of_combat'
 
+-- Secret values (WoW: Forever): whether the player is missing health or power
+-- cannot be decided here. The combat and target states still can be, and for
+-- the rest the engine evaluates a step curve against the player's health, so
+-- the power condition is dropped.
+local has_secrets = PitBull4.has_secrets
+local issecretvalue = _G.issecretvalue or function() return false end
+local SECRET_STATE = "secret_health"
+
 local timerFrame = CreateFrame("Frame")
 timerFrame:Hide()
 
@@ -73,6 +81,8 @@ function PitBull4_CombatFader:RecalculateState()
 		state = "in_combat"
 	elseif UnitExists("target") then
 		state = "target"
+	elseif has_secrets then
+		state = SECRET_STATE
 	elseif UnitHealth("player") < UnitHealthMax("player") then
 		state = "hurt"
 	else
@@ -100,9 +110,48 @@ function PitBull4_CombatFader:UNIT_HEALTH(event, unit)
 end
 
 function PitBull4_CombatFader:GetOpacity(frame)
+	if state == SECRET_STATE then
+		return nil
+	end
+
 	local layout_db = self:GetLayoutDB(frame)
 
 	return layout_db[state .. "_opacity"]
+end
+
+if has_secrets then
+	local curve, curve_key
+
+	--- Return the opacity to use, letting the engine pick between the hurt and
+	-- out-of-combat opacities by the player's health. Only applies while
+	-- neither the combat nor the target state does.
+	-- @param frame the unit frame
+	-- @param alpha the opacity the other faders agreed on
+	-- @return the opacity to use, which may be a secret
+	function PitBull4_CombatFader:GetSecretAlpha(frame, alpha)
+		if state ~= SECRET_STATE then
+			return nil
+		end
+
+		local layout_db = self:GetLayoutDB(frame)
+		local hurt, full = layout_db.hurt_opacity, layout_db.out_of_combat_opacity
+		if not issecretvalue(alpha) then
+			if hurt > alpha then hurt = alpha end
+			if full > alpha then full = alpha end
+		end
+
+		local key = ("%s,%s"):format(hurt, full)
+		if key ~= curve_key then
+			curve_key = key
+			-- a step curve holds the hurt opacity for any missing health and
+			-- changes only at exactly full
+			curve = C_CurveUtil.CreateCurve()
+			curve:SetType(Enum.LuaCurveType.Step)
+			curve:AddPoint(0, hurt)
+			curve:AddPoint(1, full)
+		end
+		return UnitHealthPercent("player", true, curve)
+	end
 end
 
 PitBull4_CombatFader:SetLayoutOptionsFunction(function(self)
