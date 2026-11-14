@@ -146,7 +146,6 @@ local function style_args(a1, a2)
 	return a1, DEFAULT_FORMAT
 end
 
-local GetQuestDifficultyColor = _G.GetQuestDifficultyColor or function() return { r = 1, g = 1, b = 1 } end
 
 local function hex(r, g, b)
 	return format("|cff%02x%02x%02x", r * 255, g * 255, b * 255)
@@ -630,11 +629,7 @@ PitBull4_TagTexts:RegisterModifier("hostilecolor", function(value, unit)
 end, L["colour by hostility"])
 
 PitBull4_TagTexts:RegisterModifier("difficultycolor", function(value, unit)
-	local level = UnitLevel(unit)
-	if level <= 0 then
-		level = 99
-	end
-	local color = GetQuestDifficultyColor(level)
+	local color = PitBull4.Utils.GetUnitDifficultyColor(unit)
 	return WrapString(value, hex(color.r, color.g, color.b), "|r")
 end, L["colour by level difficulty"])
 

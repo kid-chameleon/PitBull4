@@ -299,6 +299,23 @@ function PitBull4.Utils.BetterUnitClassification(unit)
 		return classification
 end
 
+--- Return the level difficulty colour of the given unit, relative to the player.
+-- Creatures go grey at a different level than quests do, so this asks the
+-- client for the creature difficulty (what Blizzard's TargetFrame colours the
+-- level by) rather than going through GetQuestDifficultyColor's quest range.
+-- @param unit The unit to check.
+-- @return a colour table with r, g, b fields
+function PitBull4.Utils.GetUnitDifficultyColor(unit)
+	local level = UnitLevel(unit)
+	if level <= 0 then
+		return QuestDifficultyColors["impossible"]
+	end
+	if C_PlayerInfo and C_PlayerInfo.GetContentDifficultyCreatureForPlayer and GetDifficultyColor then
+		return (GetDifficultyColor(C_PlayerInfo.GetContentDifficultyCreatureForPlayer(unit)))
+	end
+	return GetQuestDifficultyColor(level)
+end
+
 local function deep_copy(data)
 	local t = {}
 	for k, v in pairs(data) do

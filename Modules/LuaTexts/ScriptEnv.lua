@@ -427,11 +427,7 @@ end
 ScriptEnv.Level = Level
 
 local function DifficultyColor(unit)
-	local level = Level(unit)
-	if level == "??" then
-		level = 99
-	end
-	local color = GetQuestDifficultyColor(level)
+	local color = PitBull4.Utils.GetUnitDifficultyColor(unit)
 	return color.r * 255, color.g * 255, color.b * 255
 end
 ScriptEnv.DifficultyColor = DifficultyColor

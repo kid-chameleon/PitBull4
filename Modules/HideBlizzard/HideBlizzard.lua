@@ -85,18 +85,22 @@ local function simple_hook_frames(...)
 	end
 end
 
+local function silence_frame(frame)
+	UnregisterUnitWatch(frame)
+	frame:UnregisterAllEvents()
+	frame:Hide()
+
+	if frame.manabar then frame.manabar:UnregisterAllEvents() end
+	if frame.healthbar then frame.healthbar:UnregisterAllEvents() end
+	if frame.spellbar then frame.spellbar:UnregisterAllEvents() end
+	if frame.powerBarAlt then frame.powerBarAlt:UnregisterAllEvents() end
+end
+
 local function hook_frames(raw, ...)
 	for i = 1, select("#", ...) do
 		local frame = select(i, ...)
 		if frame then
-			UnregisterUnitWatch(frame)
-			frame:UnregisterAllEvents()
-			frame:Hide()
-
-			if frame.manabar then frame.manabar:UnregisterAllEvents() end
-			if frame.healthbar then frame.healthbar:UnregisterAllEvents() end
-			if frame.spellbar then frame.spellbar:UnregisterAllEvents() end
-			if frame.powerBarAlt then frame.powerBarAlt:UnregisterAllEvents() end
+			silence_frame(frame)
 
 			if raw then
 				frame.Show = noop
@@ -106,6 +110,26 @@ local function hook_frames(raw, ...)
 			end
 		elseif PitBull4.DEBUG then
 			geterrorhandler()(("PitBull4_HideBlizzard: Invalid frame at index %d"):format(i))
+		end
+	end
+end
+
+-- hook_frames(false, ...) without the reparent. Reparenting an Edit Mode
+-- system frame onto an addon frame puts it in an insecure anchor family, and
+-- secure code can then no longer anchor to it: FocusFrameMixin:SetSmallSize
+-- (run by EditModeManager:UpdateSystems on every EDIT_MODE_LAYOUTS_UPDATED)
+-- re-anchors FocusFrameToT to FocusFrame and fails with "SetPoint would
+-- result in anchor family connection" (retail 12.1.5). Hiding in place is
+-- enough: unit watch and events are off, so only Edit Mode shows the frame,
+-- out of combat, and the OnShow hook hides it again.
+local function hook_frames_in_place(...)
+	for i = 1, select("#", ...) do
+		local frame = select(i, ...)
+		if frame then
+			silence_frame(frame)
+			frame:HookScript("OnShow", hide_frame)
+		elseif PitBull4.DEBUG then
+			geterrorhandler()(("PitBull4_HideBlizzard: Invalid in-place frame at index %d"):format(i))
 		end
 	end
 end
@@ -199,7 +223,7 @@ function hiders:target()
 end
 
 function hiders:focus()
-	hook_frames(false, FocusFrame, FocusFrameToT)
+	hook_frames_in_place(FocusFrame, FocusFrameToT)
 end
 
 function hiders:castbar()
